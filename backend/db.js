@@ -114,6 +114,21 @@ const init = () => {
       FOREIGN KEY (user_id) REFERENCES users(id)
     )`);
 
+    // Email verification table
+    db.run(`CREATE TABLE IF NOT EXISTS email_verifications (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      verification_code TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      last_sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )`);
+
+    // Add email verification columns to users table
+    db.run(`ALTER TABLE users ADD COLUMN email_verified INTEGER DEFAULT 0`, (err) => {
+      // Ignore error if column already exists
+    });
+    
     // Add is_admin column if it doesn't exist (migration)
     db.run(`ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0`, (err) => {
       // Ignore error if column already exists

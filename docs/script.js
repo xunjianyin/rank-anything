@@ -12,6 +12,7 @@ let lastSearchQuery = '';
 let currentSearchResults = null;
 let currentUser = null;
 let editingReview = null;
+let pendingVerificationUserId = null;
 
 // Data structure
 let data = {
@@ -103,7 +104,15 @@ async function performLogin() {
             closeAuthModal();
             showNotification('Welcome back, ' + result.user.username + '!');
         } else {
-            alert(result.error || 'Login failed');
+            if (result.requiresVerification) {
+                // Show verification modal
+                pendingVerificationUserId = result.userId;
+                closeAuthModal();
+                showVerificationModal();
+                showNotification('Please verify your email before logging in.');
+            } else {
+                alert(result.error || 'Login failed');
+            }
         }
     } catch (error) {
         console.error('Login error:', error);
@@ -145,6 +154,20 @@ async function performRegister() {
             return;
         }
         
+        // Validate password requirements
+        if (password.length < 8) {
+            alert('Password must be at least 8 characters long');
+            return;
+        }
+        
+        const hasLetter = /[a-zA-Z]/.test(password);
+        const hasNumber = /\d/.test(password);
+        
+        if (!hasLetter || !hasNumber) {
+            alert('Password must contain both letters and numbers');
+            return;
+        }
+        
         console.log('Step 4: Making API call to register');
         const response = await fetch(BACKEND_URL + '/api/register', {
             method: 'POST',
@@ -158,9 +181,18 @@ async function performRegister() {
         
         if (response.ok) {
             console.log('Step 5: Registration successful');
-            loginUser(result.user, result.token);
-            closeAuthModal();
-            showNotification('Registration successful! Welcome ' + username + '!');
+            if (result.requiresVerification) {
+                // Show verification modal
+                pendingVerificationUserId = result.userId;
+                closeAuthModal();
+                showVerificationModal();
+                showNotification('Registration successful! Please check your email for verification code.');
+            } else {
+                // Direct login (shouldn't happen with new system)
+                loginUser(result.user, result.token);
+                closeAuthModal();
+                showNotification('Registration successful! Welcome ' + username + '!');
+            }
             console.log('Registration completed successfully');
         } else {
             alert(result.error || 'Registration failed');
@@ -385,6 +417,107 @@ function closeAuthModal() {
     const registerForm = document.getElementById('register-form');
     if (loginForm) loginForm.reset();
     if (registerForm) registerForm.reset();
+}
+
+// Email Verification Functions
+function showVerificationModal() {
+    const modal = document.getElementById('verification-modal');
+    if (modal) {
+        modal.style.display = 'flex';
+    }
+}
+
+function closeVerificationModal() {
+    const modal = document.getElementById('verification-modal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+    
+    // Clear form fields
+    const verificationForm = document.getElementById('verification-form');
+    if (verificationForm) verificationForm.reset();
+    
+    pendingVerificationUserId = null;
+}
+
+async function handleEmailVerification(event) {
+    event.preventDefault();
+    
+    const verificationCode = document.getElementById('verification-code').value.trim();
+    
+    if (!verificationCode) {
+        alert('Please enter the verification code');
+        return;
+    }
+    
+    if (!pendingVerificationUserId) {
+        alert('No pending verification. Please register again.');
+        closeVerificationModal();
+        return;
+    }
+    
+    try {
+        const response = await fetch(BACKEND_URL + '/api/verify-email', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ 
+                userId: pendingVerificationUserId, 
+                verificationCode: verificationCode 
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok) {
+            loginUser(result.user, result.token);
+            closeVerificationModal();
+            showNotification('Email verified successfully! Welcome to Rank-Anything!');
+        } else {
+            alert(result.error || 'Verification failed');
+        }
+    } catch (error) {
+        console.error('Verification error:', error);
+        alert('Verification failed. Please check your connection and try again.');
+    }
+}
+
+async function resendVerificationCode() {
+    if (!pendingVerificationUserId) {
+        alert('No pending verification. Please register again.');
+        closeVerificationModal();
+        return;
+    }
+    
+    const resendBtn = document.getElementById('resend-verification-btn');
+    const originalText = resendBtn.textContent;
+    resendBtn.disabled = true;
+    resendBtn.textContent = 'Sending...';
+    
+    try {
+        const response = await fetch(BACKEND_URL + '/api/resend-verification', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ userId: pendingVerificationUserId })
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok) {
+            showNotification('Verification code sent successfully!');
+        } else {
+            alert(result.error || 'Failed to resend verification code');
+        }
+    } catch (error) {
+        console.error('Resend verification error:', error);
+        alert('Failed to resend verification code. Please check your connection and try again.');
+    } finally {
+        resendBtn.disabled = false;
+        resendBtn.textContent = originalText;
+    }
 }
 
 function toggleUserMenu(event) {
@@ -1850,30 +1983,98 @@ async function updateUserProfile(userId, username, email) {
     return await res.json();
 }
 
+async function updateUserProfileWithPassword(userId, username, email, currentPassword, newPassword) {
+    const token = getAuthToken();
+    const res = await fetch(BACKEND_URL + `/api/users/${userId}/profile`, {
+        method: 'PUT',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + token
+        },
+        body: JSON.stringify({ username, email, currentPassword, newPassword })
+    });
+    if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || 'Failed to update profile');
+    }
+    return await res.json();
+}
+
 async function updateUserInfo(event) {
     event.preventDefault();
     const newUsername = document.getElementById('user-space-username').value.trim();
     const newEmail = document.getElementById('user-space-email').value.trim();
+    const currentPassword = document.getElementById('current-password').value;
+    const newPassword = document.getElementById('new-password').value;
+    const confirmNewPassword = document.getElementById('confirm-new-password').value;
     
     if (!newUsername || !newEmail) {
         alert('Username and email cannot be empty');
         return;
     }
     
-    if (newUsername === currentUser.username && newEmail === currentUser.email) {
+    // Check if password change is requested
+    const isPasswordChange = currentPassword || newPassword || confirmNewPassword;
+    
+    if (isPasswordChange) {
+        if (!currentPassword || !newPassword || !confirmNewPassword) {
+            alert('Please fill in all password fields to change your password');
+            return;
+        }
+        
+        if (newPassword !== confirmNewPassword) {
+            alert('New passwords do not match');
+            return;
+        }
+        
+        // Validate new password
+        if (newPassword.length < 8) {
+            alert('New password must be at least 8 characters long');
+            return;
+        }
+        
+        const hasLetter = /[a-zA-Z]/.test(newPassword);
+        const hasNumber = /\d/.test(newPassword);
+        
+        if (!hasLetter || !hasNumber) {
+            alert('New password must contain both letters and numbers');
+            return;
+        }
+    }
+    
+    const profileChanged = newUsername !== currentUser.username || newEmail !== currentUser.email;
+    
+    if (!profileChanged && !isPasswordChange) {
         showNotification('No changes to save');
         return;
     }
     
     try {
-        const result = await updateUserProfile(currentUser.id, newUsername, newEmail);
+        let result;
+        
+        if (isPasswordChange) {
+            // Update profile with password change
+            result = await updateUserProfileWithPassword(currentUser.id, newUsername, newEmail, currentPassword, newPassword);
+        } else {
+            // Update profile only
+            result = await updateUserProfile(currentUser.id, newUsername, newEmail);
+        }
         
         // Update current user and token
         currentUser = result.user;
         saveAuthToken(result.token);
         
         updateUserInterface();
-        showNotification('Profile updated successfully!');
+        
+        if (isPasswordChange) {
+            showNotification('Profile and password updated successfully!');
+            // Clear password fields
+            document.getElementById('current-password').value = '';
+            document.getElementById('new-password').value = '';
+            document.getElementById('confirm-new-password').value = '';
+        } else {
+            showNotification('Profile updated successfully!');
+        }
         
         // Refresh the user space page to show updated stats
         await renderUserSpacePage();

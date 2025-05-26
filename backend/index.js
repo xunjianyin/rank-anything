@@ -3,12 +3,79 @@ const cors = require('cors');
 const { init, db } = require('./db');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
+const nodemailer = require('nodemailer');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
 const JWT_SECRET = process.env.JWT_SECRET || 'rankanything_secret';
 const JWT_EXPIRES_IN = '7d';
+
+// Email configuration
+const EMAIL_CONFIG = {
+  host: 'smtp.gmail.com',
+  port: 587,
+  secure: false,
+  auth: {
+    user: 'arvidyin@gmail.com',
+    pass: process.env.EMAIL_PASSWORD || 'your-app-password' // Use app password for Gmail
+  }
+};
+
+// Create email transporter
+const transporter = nodemailer.createTransporter(EMAIL_CONFIG);
+
+// Password validation function
+function validatePassword(password) {
+  if (password.length < 8) {
+    return { valid: false, message: 'Password must be at least 8 characters long' };
+  }
+  
+  const hasLetter = /[a-zA-Z]/.test(password);
+  const hasNumber = /\d/.test(password);
+  
+  if (!hasLetter || !hasNumber) {
+    return { valid: false, message: 'Password must contain both letters and numbers' };
+  }
+  
+  return { valid: true };
+}
+
+// Generate verification code
+function generateVerificationCode() {
+  return Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit code
+}
+
+// Send verification email
+async function sendVerificationEmail(email, code, username) {
+  const mailOptions = {
+    from: 'arvidyin@gmail.com',
+    to: email,
+    subject: 'Rank-Anything Email Verification',
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #667eea;">Welcome to Rank-Anything!</h2>
+        <p>Hello ${username},</p>
+        <p>Thank you for registering with Rank-Anything. Please use the following verification code to complete your registration:</p>
+        <div style="background: #f8fafc; padding: 20px; border-radius: 8px; text-align: center; margin: 20px 0;">
+          <h1 style="color: #667eea; font-size: 32px; margin: 0; letter-spacing: 4px;">${code}</h1>
+        </div>
+        <p>This verification code is valid for your account and will remain active until a new code is generated.</p>
+        <p>If you didn't create an account with us, please ignore this email.</p>
+        <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 30px 0;">
+        <p style="color: #718096; font-size: 14px;">Best regards,<br>The Rank-Anything Team</p>
+      </div>
+    `
+  };
+
+  try {
+    await transporter.sendMail(mailOptions);
+    return { success: true };
+  } catch (error) {
+    console.error('Email sending error:', error);
+    return { success: false, error: error.message };
+  }
+}
 
 app.use(cors());
 app.use(express.json());
@@ -26,23 +93,167 @@ app.get('/api/health', (req, res) => {
 });
 
 // User registration
-app.post('/api/register', (req, res) => {
+app.post('/api/register', async (req, res) => {
   const { username, email, password } = req.body;
   if (!username || !email || !password) {
     return res.status(400).json({ error: 'All fields are required.' });
   }
-  db.get('SELECT * FROM users WHERE email = ? OR username = ?', [email, username], (err, user) => {
+
+  // Validate password
+  const passwordValidation = validatePassword(password);
+  if (!passwordValidation.valid) {
+    return res.status(400).json({ error: passwordValidation.message });
+  }
+
+  db.get('SELECT * FROM users WHERE email = ? OR username = ?', [email, username], async (err, user) => {
     if (err) return res.status(500).json({ error: 'Database error.' });
     if (user) return res.status(400).json({ error: 'Email or username already exists.' });
+    
     const hash = bcrypt.hashSync(password, 10);
-    db.run('INSERT INTO users (username, email, password) VALUES (?, ?, ?)', [username, email, hash], function(err) {
+    db.run('INSERT INTO users (username, email, password, email_verified) VALUES (?, ?, ?, ?)', 
+      [username, email, hash, 0], async function(err) {
+        if (err) return res.status(500).json({ error: 'Database error.' });
+        
+        const userId = this.lastID;
+        
+        // Generate and store verification code
+        const verificationCode = generateVerificationCode();
+        db.run('INSERT INTO email_verifications (user_id, verification_code) VALUES (?, ?)', 
+          [userId, verificationCode], async (err) => {
+            if (err) {
+              console.error('Error storing verification code:', err);
+              return res.status(500).json({ error: 'Database error.' });
+            }
+            
+            // Send verification email
+            const emailResult = await sendVerificationEmail(email, verificationCode, username);
+            if (!emailResult.success) {
+              console.error('Failed to send verification email:', emailResult.error);
+              return res.status(500).json({ error: 'Failed to send verification email. Please try again.' });
+            }
+            
+            res.json({ 
+              message: 'Registration successful! Please check your email for verification code.',
+              userId: userId,
+              requiresVerification: true
+            });
+          });
+      });
+  });
+});
+
+// Email verification
+app.post('/api/verify-email', (req, res) => {
+  const { userId, verificationCode } = req.body;
+  if (!userId || !verificationCode) {
+    return res.status(400).json({ error: 'User ID and verification code are required.' });
+  }
+
+  // Check if verification code is valid
+  db.get('SELECT * FROM email_verifications WHERE user_id = ? AND verification_code = ?', 
+    [userId, verificationCode], (err, verification) => {
       if (err) return res.status(500).json({ error: 'Database error.' });
-      const userId = this.lastID;
-      const token = jwt.sign({ id: userId, username, email, isAdmin: false }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
-      res.json({ token, user: { id: userId, username, email, isAdmin: false } });
+      if (!verification) {
+        return res.status(400).json({ error: 'Invalid verification code.' });
+      }
+
+      // Update user as verified
+      db.run('UPDATE users SET email_verified = 1 WHERE id = ?', [userId], (err) => {
+        if (err) return res.status(500).json({ error: 'Database error.' });
+
+        // Get user details for token
+        db.get('SELECT * FROM users WHERE id = ?', [userId], (err, user) => {
+          if (err) return res.status(500).json({ error: 'Database error.' });
+          
+          const token = jwt.sign({ 
+            id: user.id, 
+            username: user.username, 
+            email: user.email, 
+            isAdmin: !!user.is_admin 
+          }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+          
+          res.json({ 
+            token, 
+            user: { 
+              id: user.id, 
+              username: user.username, 
+              email: user.email, 
+              isAdmin: !!user.is_admin,
+              emailVerified: true
+            },
+            message: 'Email verified successfully!'
+          });
+        });
+      });
+    });
+});
+
+// Resend verification code
+app.post('/api/resend-verification', async (req, res) => {
+  const { userId } = req.body;
+  if (!userId) {
+    return res.status(400).json({ error: 'User ID is required.' });
+  }
+
+  // Check rate limiting (1 hour)
+  db.get('SELECT * FROM email_verifications WHERE user_id = ?', [userId], async (err, verification) => {
+    if (err) return res.status(500).json({ error: 'Database error.' });
+    
+    if (verification) {
+      const lastSent = new Date(verification.last_sent_at);
+      const now = new Date();
+      const hoursSinceLastSent = (now - lastSent) / (1000 * 60 * 60);
+      
+      if (hoursSinceLastSent < 1) {
+        const minutesRemaining = Math.ceil((60 - (hoursSinceLastSent * 60)));
+        return res.status(429).json({ 
+          error: `Please wait ${minutesRemaining} minutes before requesting another verification code.` 
+        });
+      }
+    }
+
+    // Get user details
+    db.get('SELECT * FROM users WHERE id = ?', [userId], async (err, user) => {
+      if (err) return res.status(500).json({ error: 'Database error.' });
+      if (!user) return res.status(404).json({ error: 'User not found.' });
+      
+      if (user.email_verified) {
+        return res.status(400).json({ error: 'Email is already verified.' });
+      }
+
+      // Generate new verification code
+      const verificationCode = generateVerificationCode();
+      
+      // Update or insert verification code
+      if (verification) {
+        db.run('UPDATE email_verifications SET verification_code = ?, last_sent_at = CURRENT_TIMESTAMP WHERE user_id = ?', 
+          [verificationCode, userId], async (err) => {
+            if (err) return res.status(500).json({ error: 'Database error.' });
+            
+            const emailResult = await sendVerificationEmail(user.email, verificationCode, user.username);
+            if (!emailResult.success) {
+              return res.status(500).json({ error: 'Failed to send verification email.' });
+            }
+            
+            res.json({ message: 'Verification code sent successfully!' });
+          });
+      } else {
+        db.run('INSERT INTO email_verifications (user_id, verification_code) VALUES (?, ?)', 
+          [userId, verificationCode], async (err) => {
+            if (err) return res.status(500).json({ error: 'Database error.' });
+            
+            const emailResult = await sendVerificationEmail(user.email, verificationCode, user.username);
+            if (!emailResult.success) {
+              return res.status(500).json({ error: 'Failed to send verification email.' });
+            }
+            
+            res.json({ message: 'Verification code sent successfully!' });
+          });
+      }
     });
   });
 });
+
 
 // User login
 app.post('/api/login', (req, res) => {
@@ -57,8 +268,33 @@ app.post('/api/login', (req, res) => {
     if (!bcrypt.compareSync(password, user.password)) {
       return res.status(400).json({ error: 'Invalid email/username or password.' });
     }
-    const token = jwt.sign({ id: user.id, username: user.username, email: user.email, isAdmin: !!user.is_admin }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
-    res.json({ token, user: { id: user.id, username: user.username, email: user.email, isAdmin: !!user.is_admin } });
+    
+    // Check if email is verified (skip for admin user)
+    if (!user.email_verified && user.username !== 'Admin') {
+      return res.status(403).json({ 
+        error: 'Please verify your email before logging in.',
+        requiresVerification: true,
+        userId: user.id
+      });
+    }
+    
+    const token = jwt.sign({ 
+      id: user.id, 
+      username: user.username, 
+      email: user.email, 
+      isAdmin: !!user.is_admin 
+    }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+    
+    res.json({ 
+      token, 
+      user: { 
+        id: user.id, 
+        username: user.username, 
+        email: user.email, 
+        isAdmin: !!user.is_admin,
+        emailVerified: !!user.email_verified
+      } 
+    });
   });
 });
 
@@ -831,7 +1067,7 @@ app.get('/api/users/:id/stats', authenticateToken, (req, res) => {
 // Update user profile
 app.put('/api/users/:id/profile', authenticateToken, (req, res) => {
   const userId = req.params.id;
-  const { username, email } = req.body;
+  const { username, email, currentPassword, newPassword } = req.body;
   
   // Only allow users to update their own profile or admin to update any
   if (parseInt(userId) !== req.user.id && !req.user.isAdmin) {
@@ -842,20 +1078,54 @@ app.put('/api/users/:id/profile', authenticateToken, (req, res) => {
     return res.status(400).json({ error: 'Username and email are required.' });
   }
   
-  // Check for duplicate username/email (excluding current user)
-  db.get('SELECT * FROM users WHERE (username = ? OR email = ?) AND id != ?', 
-    [username, email, userId], (err, existing) => {
-      if (err) return res.status(500).json({ error: 'Database error.' });
-      if (existing) {
-        return res.status(400).json({ error: 'Username or email already exists.' });
-      }
-      
-      db.run('UPDATE users SET username = ?, email = ? WHERE id = ?', 
-        [username, email, userId], function(err) {
+  // If password update is requested, validate it
+  if (newPassword) {
+    if (!currentPassword) {
+      return res.status(400).json({ error: 'Current password is required to change password.' });
+    }
+    
+    const passwordValidation = validatePassword(newPassword);
+    if (!passwordValidation.valid) {
+      return res.status(400).json({ error: passwordValidation.message });
+    }
+  }
+  
+  // Get current user data to verify current password if needed
+  db.get('SELECT * FROM users WHERE id = ?', [userId], (err, currentUser) => {
+    if (err) return res.status(500).json({ error: 'Database error.' });
+    if (!currentUser) return res.status(404).json({ error: 'User not found.' });
+    
+    // Verify current password if password change is requested
+    if (newPassword && !bcrypt.compareSync(currentPassword, currentUser.password)) {
+      return res.status(400).json({ error: 'Current password is incorrect.' });
+    }
+    
+    // Check for duplicate username/email (excluding current user)
+    db.get('SELECT * FROM users WHERE (username = ? OR email = ?) AND id != ?', 
+      [username, email, userId], (err, existing) => {
+        if (err) return res.status(500).json({ error: 'Database error.' });
+        if (existing) {
+          return res.status(400).json({ error: 'Username or email already exists.' });
+        }
+        
+        // Prepare update query
+        let updateQuery = 'UPDATE users SET username = ?, email = ?';
+        let updateParams = [username, email];
+        
+        if (newPassword) {
+          const hashedNewPassword = bcrypt.hashSync(newPassword, 10);
+          updateQuery += ', password = ?';
+          updateParams.push(hashedNewPassword);
+        }
+        
+        updateQuery += ' WHERE id = ?';
+        updateParams.push(userId);
+        
+        db.run(updateQuery, updateParams, function(err) {
           if (err) return res.status(500).json({ error: 'Database error.' });
           
           // Return updated user info
-          db.get('SELECT id, username, email, is_admin FROM users WHERE id = ?', [userId], (err, user) => {
+          db.get('SELECT id, username, email, is_admin, email_verified FROM users WHERE id = ?', [userId], (err, user) => {
             if (err) return res.status(500).json({ error: 'Database error.' });
             
             // Generate new token with updated info
@@ -872,13 +1142,16 @@ app.put('/api/users/:id/profile', authenticateToken, (req, res) => {
                 id: user.id, 
                 username: user.username, 
                 email: user.email, 
-                isAdmin: !!user.is_admin 
+                isAdmin: !!user.is_admin,
+                emailVerified: !!user.email_verified
               },
-              token 
+              token,
+              message: newPassword ? 'Profile and password updated successfully!' : 'Profile updated successfully!'
             });
           });
         });
-    });
+      });
+  });
 });
 
 // --- User Profile and Rating Endpoints ---

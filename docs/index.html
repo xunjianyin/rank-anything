@@ -49,6 +49,9 @@
                         <div class="form-group">
                             <label for="register-password">Password</label>
                             <input type="password" id="register-password" required>
+                            <small style="color: #718096; font-size: 0.8rem; margin-top: 0.25rem; display: block;">
+                                Password must be at least 8 characters and contain both letters and numbers
+                            </small>
                         </div>
                         <div class="form-group">
                             <label for="register-password-confirm">Confirm Password</label>
@@ -59,6 +62,40 @@
                             <button type="button" class="btn btn-secondary" onclick="switchToLogin()">Login Instead</button>
                         </div>
                     </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Email Verification Modal -->
+        <div class="modal-overlay" id="verification-modal" style="display: none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Verify Your Email</h2>
+                    <button class="modal-close" onclick="closeVerificationModal()">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <p style="margin-bottom: 1rem; color: #4a5568;">
+                        We've sent a verification code to your email address. Please enter it below to complete your registration.
+                    </p>
+                    <form id="verification-form" onsubmit="handleEmailVerification(event)">
+                        <div class="form-group">
+                            <label for="verification-code">Verification Code</label>
+                            <input type="text" id="verification-code" placeholder="Enter 6-digit code" maxlength="6" required>
+                        </div>
+                        <div class="form-actions">
+                            <button type="submit" class="btn btn-primary">Verify Email</button>
+                        </div>
+                    </form>
+                    <div style="margin-top: 1rem; text-align: center;">
+                        <p style="font-size: 0.9rem; color: #718096; margin-bottom: 0.5rem;">
+                            Didn't receive the code?
+                        </p>
+                        <button id="resend-verification-btn" class="btn btn-secondary" onclick="resendVerificationCode()">
+                            Resend Code
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -328,6 +365,24 @@
                                     <label for="user-space-email">Email</label>
                                     <input type="email" id="user-space-email" required>
                                 </div>
+                                
+                                <h3 style="margin-top: 2rem; margin-bottom: 1rem; color: #2d3748;">Change Password</h3>
+                                <div class="form-group">
+                                    <label for="current-password">Current Password</label>
+                                    <input type="password" id="current-password" placeholder="Enter current password">
+                                </div>
+                                <div class="form-group">
+                                    <label for="new-password">New Password</label>
+                                    <input type="password" id="new-password" placeholder="Enter new password">
+                                    <small style="color: #718096; font-size: 0.8rem; margin-top: 0.25rem; display: block;">
+                                        Password must be at least 8 characters and contain both letters and numbers
+                                    </small>
+                                </div>
+                                <div class="form-group">
+                                    <label for="confirm-new-password">Confirm New Password</label>
+                                    <input type="password" id="confirm-new-password" placeholder="Confirm new password">
+                                </div>
+                                
                                 <div class="form-actions">
                                     <button type="submit" class="btn btn-primary">Update Profile</button>
                                 </div>
