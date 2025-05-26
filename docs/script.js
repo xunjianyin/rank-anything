@@ -76,29 +76,42 @@ function initializeAuthForms() {
 }
 
 // Direct button click handlers
-function performLogin() {
+async function performLogin() {
     console.log('Perform login called');
     
-    const username = document.getElementById('login-username').value.trim();
+    const email = document.getElementById('login-username').value.trim();
     const password = document.getElementById('login-password').value;
     
-    if (!username || !password) {
-        alert('Please enter both username and password');
+    if (!email || !password) {
+        alert('Please enter both email and password');
         return;
     }
     
-    const user = data.users[username];
-    if (!user || user.password !== password) {
-        alert('Invalid username or password');
-        return;
+    try {
+        const response = await fetch(BACKEND_URL + '/api/login', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ email, password })
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok) {
+            loginUser(result.user, result.token);
+            closeAuthModal();
+            showNotification('Welcome back, ' + result.user.username + '!');
+        } else {
+            alert(result.error || 'Login failed');
+        }
+    } catch (error) {
+        console.error('Login error:', error);
+        alert('Login failed. Please check your connection and try again.');
     }
-    
-    loginUser(user);
-    closeAuthModal();
-    showNotification('Welcome back, ' + username + '!');
 }
 
-function performRegister() {
+async function performRegister() {
     console.log('Perform register called');
     try {
         console.log('Step 1: Getting form elements');
@@ -131,37 +144,27 @@ function performRegister() {
             alert('Passwords do not match');
             return;
         }
-        // Prevent duplicate username
-        if (data.users[username]) {
-            alert('Username already exists');
-            return;
+        
+        console.log('Step 4: Making API call to register');
+        const response = await fetch(BACKEND_URL + '/api/register', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ username, email, password })
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok) {
+            console.log('Step 5: Registration successful');
+            loginUser(result.user, result.token);
+            closeAuthModal();
+            showNotification('Registration successful! Welcome ' + username + '!');
+            console.log('Registration completed successfully');
+        } else {
+            alert(result.error || 'Registration failed');
         }
-        // Prevent duplicate email
-        for (const userKey in data.users) {
-            if (data.users[userKey].email === email) {
-                alert('Email already registered');
-                return;
-            }
-        }
-        console.log('Step 5: Creating user object');
-        const user = {
-            username: username,
-            email: email,
-            password: password,
-            joinedAt: new Date().toISOString()
-        };
-        console.log('Created user object:', user);
-        console.log('Step 6: Adding user to data');
-        data.users[username] = user;
-        console.log('Step 7: Saving data');
-        saveData();
-        console.log('Step 8: Logging in user');
-        loginUser(user);
-        console.log('Step 9: Closing modal');
-        closeAuthModal();
-        console.log('Step 10: Showing notification');
-        showNotification('Registration successful! Welcome ' + username + '!');
-        console.log('Registration completed successfully');
     } catch (error) {
         console.error('Registration error details:', error);
         console.error('Error stack:', error.stack);
@@ -435,35 +438,27 @@ function loadData() {
         if (savedData) {
             const parsedData = JSON.parse(savedData);
             
-            // Merge with default structure to ensure all properties exist
+            // Only keep dailyUsage for now, since we still need it for local tracking
             data = {
                 users: {},
                 topics: [],
                 objects: {},
                 ratings: {},
                 proposals: {},
-                dailyUsage: {},
-                ...parsedData
+                dailyUsage: parsedData.dailyUsage || {},
             };
             
-            // Ensure users object exists even if it was undefined in saved data
-            if (!data.users || typeof data.users !== 'object') {
-                data.users = {};
-            }
-            
-            // Ensure proposals object exists
-            if (!data.proposals || typeof data.proposals !== 'object') {
-                data.proposals = {};
-            }
-            
-            // Ensure dailyUsage object exists
-            if (!data.dailyUsage || typeof data.dailyUsage !== 'object') {
-                data.dailyUsage = {};
-            }
-            
-            console.log('Data loaded successfully:', data);
+            console.log('Local data loaded successfully (dailyUsage only):', data);
         } else {
             console.log('No saved data found, using default structure');
+            data = {
+                users: {},
+                topics: [],
+                objects: {},
+                ratings: {},
+                proposals: {},
+                dailyUsage: {}
+            };
         }
     } catch (error) {
         console.error('Error loading data:', error);
@@ -477,23 +472,9 @@ function loadData() {
             dailyUsage: {}
         };
     }
-    ensureAdminUser();
 }
 
-// Ensure admin user exists on load
-function ensureAdminUser() {
-    if (!data.users['Admin']) {
-        data.users['Admin'] = {
-            username: 'Admin',
-            email: 'admin@system.local',
-            password: '202505262142',
-            joinedAt: new Date().toISOString(),
-            isAdmin: true
-        };
-    } else {
-        data.users['Admin'].isAdmin = true;
-    }
-}
+// Note: Admin users are now managed through the backend database
 
 // Navigation functions
 function showHomePage() {
