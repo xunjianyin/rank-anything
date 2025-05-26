@@ -464,38 +464,64 @@ app.get('/api/objects/:objectId/ratings', (req, res) => {
     res.json(rows);
   });
 });
-// Create or update a rating/review for an object (one per user per object)
+// Create or update a rating/review for an object (one per user per object per day)
 app.post('/api/objects/:objectId/ratings', authenticateToken, (req, res) => {
   const objectId = req.params.objectId;
   const { rating, review } = req.body;
   if (!rating || rating < 1 || rating > 5) return res.status(400).json({ error: 'Rating must be 1-5.' });
-  // Daily limit: 64 ratings per user per day
-  db.get(`SELECT COUNT(*) as count FROM ratings WHERE user_id = ? AND DATE(created_at) = DATE('now')`, [req.user.id], (err, row) => {
+  
+  // Check if user already rated this object
+  db.get('SELECT * FROM ratings WHERE object_id = ? AND user_id = ?', [objectId, req.user.id], (err, existing) => {
     if (err) return res.status(500).json({ error: 'Database error.' });
-    if (row.count >= 64) return res.status(403).json({ error: 'Daily rating limit reached.' });
-    // Check if user already rated this object
-    db.get('SELECT * FROM ratings WHERE object_id = ? AND user_id = ?', [objectId, req.user.id], (err, existing) => {
-      if (err) return res.status(500).json({ error: 'Database error.' });
-      if (existing) {
-        // Update
-        db.run('UPDATE ratings SET rating = ?, review = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [rating, review, existing.id], function(err) {
+    
+    if (existing) {
+      // Check if user already modified this rating today
+      db.get(`SELECT COUNT(*) as count FROM ratings WHERE object_id = ? AND user_id = ? AND DATE(updated_at) = DATE('now')`, 
+        [objectId, req.user.id], (err, row) => {
           if (err) return res.status(500).json({ error: 'Database error.' });
-          db.get('SELECT * FROM ratings WHERE id = ?', [existing.id], (err, updated) => {
-            if (err) return res.status(500).json({ error: 'Database error.' });
-            res.json(updated);
-          });
+          if (row.count > 0 && existing.updated_at !== existing.created_at) {
+            return res.status(403).json({ error: 'You can only modify your rating once per day.' });
+          }
+          
+          // Update existing rating
+          db.run('UPDATE ratings SET rating = ?, review = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', 
+            [rating, review, existing.id], function(err) {
+              if (err) return res.status(500).json({ error: 'Database error.' });
+              db.get('SELECT r.*, u.username FROM ratings r LEFT JOIN users u ON r.user_id = u.id WHERE r.id = ?', 
+                [existing.id], (err, updated) => {
+                  if (err) return res.status(500).json({ error: 'Database error.' });
+                  res.json({ ...updated, isUpdate: true });
+                });
+            });
         });
-      } else {
-        // Create
-        db.run('INSERT INTO ratings (object_id, user_id, rating, review) VALUES (?, ?, ?, ?)', [objectId, req.user.id, rating, review], function(err) {
-          if (err) return res.status(500).json({ error: 'Database error.' });
-          db.get('SELECT * FROM ratings WHERE id = ?', [this.lastID], (err, newRating) => {
+    } else {
+      // Check daily limit for new ratings
+      db.get(`SELECT COUNT(*) as count FROM ratings WHERE user_id = ? AND DATE(created_at) = DATE('now')`, [req.user.id], (err, row) => {
+        if (err) return res.status(500).json({ error: 'Database error.' });
+        if (row.count >= 64) return res.status(403).json({ error: 'Daily rating limit reached (64 new ratings per day).' });
+        
+        // Create new rating
+        db.run('INSERT INTO ratings (object_id, user_id, rating, review) VALUES (?, ?, ?, ?)', 
+          [objectId, req.user.id, rating, review], function(err) {
             if (err) return res.status(500).json({ error: 'Database error.' });
-            res.json(newRating);
+            db.get('SELECT r.*, u.username FROM ratings r LEFT JOIN users u ON r.user_id = u.id WHERE r.id = ?', 
+              [this.lastID], (err, newRating) => {
+                if (err) return res.status(500).json({ error: 'Database error.' });
+                res.json({ ...newRating, isUpdate: false });
+              });
           });
-        });
-      }
-    });
+      });
+    }
+  });
+});
+
+// Get current user's rating for an object
+app.get('/api/objects/:objectId/my-rating', authenticateToken, (req, res) => {
+  const objectId = req.params.objectId;
+  
+  db.get('SELECT * FROM ratings WHERE object_id = ? AND user_id = ?', [objectId, req.user.id], (err, rating) => {
+    if (err) return res.status(500).json({ error: 'Database error.' });
+    res.json({ rating: rating || null });
   });
 });
 
@@ -890,7 +916,7 @@ app.get('/api/users/:id/profile', (req, res) => {
   });
 });
 
-// Rate a user (like/dislike)
+// Rate a user (like/dislike) - one rating per user per day
 app.post('/api/users/:id/rate', authenticateToken, (req, res) => {
   const ratedUserId = req.params.id;
   const { rating } = req.body; // 1 for like, -1 for dislike
@@ -908,53 +934,111 @@ app.post('/api/users/:id/rate', authenticateToken, (req, res) => {
     if (err) return res.status(500).json({ error: 'Database error.' });
     if (!user) return res.status(404).json({ error: 'User not found.' });
     
-    // Insert or update rating
-    db.run(`
-      INSERT INTO user_ratings (rated_user_id, rater_user_id, rating, updated_at) 
-      VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-      ON CONFLICT(rated_user_id, rater_user_id) 
-      DO UPDATE SET rating = excluded.rating, updated_at = excluded.updated_at
-    `, [ratedUserId, req.user.id, rating], function(err) {
-      if (err) return res.status(500).json({ error: 'Database error.' });
-      
-      // Check if user should be restricted due to dislikes
-      db.get(`
-        SELECT COUNT(*) as dislike_count 
-        FROM user_ratings 
-        WHERE rated_user_id = ? AND rating = -1
-      `, [ratedUserId], (err, result) => {
+    // Check if user already has a rating for this user
+    db.get('SELECT * FROM user_ratings WHERE rated_user_id = ? AND rater_user_id = ?', 
+      [ratedUserId, req.user.id], (err, existing) => {
         if (err) return res.status(500).json({ error: 'Database error.' });
         
-        const dislikeCount = result.dislike_count;
-        
-        // For every 5 dislikes, ban for 1 day
-        if (dislikeCount > 0 && dislikeCount % 5 === 0) {
-          const startDate = new Date().toISOString();
-          const endDate = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(); // 1 day from now
-          
-          // Check if there's already an active restriction
-          db.get(`
-            SELECT * FROM user_restrictions 
-            WHERE user_id = ? AND restriction_type = 'editing_ban' 
-            AND start_date <= CURRENT_TIMESTAMP AND end_date > CURRENT_TIMESTAMP
-          `, [ratedUserId], (err, existingRestriction) => {
-            if (err) return res.status(500).json({ error: 'Database error.' });
-            
-            if (!existingRestriction) {
-              // Add new restriction
-              db.run(`
-                INSERT INTO user_restrictions (user_id, restriction_type, start_date, end_date, reason)
-                VALUES (?, 'editing_ban', ?, ?, ?)
-              `, [ratedUserId, startDate, endDate, `Automatic ban due to ${dislikeCount} dislikes`], (err) => {
-                if (err) console.error('Error creating restriction:', err);
-              });
-            }
-          });
+        if (existing) {
+          // Check if user already modified this rating today
+          db.get(`SELECT COUNT(*) as count FROM user_ratings WHERE rated_user_id = ? AND rater_user_id = ? AND DATE(updated_at) = DATE('now')`, 
+            [ratedUserId, req.user.id], (err, row) => {
+              if (err) return res.status(500).json({ error: 'Database error.' });
+              if (row.count > 0 && existing.updated_at !== existing.created_at) {
+                return res.status(403).json({ error: 'You can only modify your user rating once per day.' });
+              }
+              
+              // Update existing rating
+              db.run(`UPDATE user_ratings SET rating = ?, updated_at = CURRENT_TIMESTAMP WHERE rated_user_id = ? AND rater_user_id = ?`, 
+                [rating, ratedUserId, req.user.id], function(err) {
+                  if (err) return res.status(500).json({ error: 'Database error.' });
+                  
+                  // Check if user should be restricted due to dislikes
+                  db.get(`SELECT COUNT(*) as dislike_count FROM user_ratings WHERE rated_user_id = ? AND rating = -1`, 
+                    [ratedUserId], (err, result) => {
+                      if (err) return res.status(500).json({ error: 'Database error.' });
+                      
+                      const dislikeCount = result.dislike_count;
+                      
+                      // For every 5 dislikes, ban for 1 day
+                      if (dislikeCount > 0 && dislikeCount % 5 === 0) {
+                        const startDate = new Date().toISOString();
+                        const endDate = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(); // 1 day from now
+                        
+                        // Check if there's already an active restriction
+                        db.get(`
+                          SELECT * FROM user_restrictions 
+                          WHERE user_id = ? AND restriction_type = 'editing_ban' 
+                          AND start_date <= CURRENT_TIMESTAMP AND end_date > CURRENT_TIMESTAMP
+                        `, [ratedUserId], (err, existingRestriction) => {
+                          if (err) return res.status(500).json({ error: 'Database error.' });
+                          
+                          if (!existingRestriction) {
+                            // Add new restriction
+                            db.run(`
+                              INSERT INTO user_restrictions (user_id, restriction_type, start_date, end_date, reason)
+                              VALUES (?, 'editing_ban', ?, ?, ?)
+                            `, [ratedUserId, startDate, endDate, `Automatic ban due to ${dislikeCount} dislikes`], (err) => {
+                              if (err) console.error('Error creating restriction:', err);
+                            });
+                          }
+                        });
+                      }
+                      
+                      res.json({ success: true, dislike_count: dislikeCount, isUpdate: true });
+                    });
+                });
+            });
+        } else {
+          // Check daily limit for new user ratings
+          db.get(`SELECT COUNT(*) as count FROM user_ratings WHERE rater_user_id = ? AND DATE(created_at) = DATE('now')`, 
+            [req.user.id], (err, row) => {
+              if (err) return res.status(500).json({ error: 'Database error.' });
+              if (row.count >= 32) return res.status(403).json({ error: 'Daily user rating limit reached (32 new user ratings per day).' });
+              
+              // Create new rating
+              db.run(`INSERT INTO user_ratings (rated_user_id, rater_user_id, rating, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)`, 
+                [ratedUserId, req.user.id, rating], function(err) {
+                  if (err) return res.status(500).json({ error: 'Database error.' });
+                  
+                  // Check if user should be restricted due to dislikes
+                  db.get(`SELECT COUNT(*) as dislike_count FROM user_ratings WHERE rated_user_id = ? AND rating = -1`, 
+                    [ratedUserId], (err, result) => {
+                      if (err) return res.status(500).json({ error: 'Database error.' });
+                      
+                      const dislikeCount = result.dislike_count;
+                      
+                      // For every 5 dislikes, ban for 1 day
+                      if (dislikeCount > 0 && dislikeCount % 5 === 0) {
+                        const startDate = new Date().toISOString();
+                        const endDate = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(); // 1 day from now
+                        
+                        // Check if there's already an active restriction
+                        db.get(`
+                          SELECT * FROM user_restrictions 
+                          WHERE user_id = ? AND restriction_type = 'editing_ban' 
+                          AND start_date <= CURRENT_TIMESTAMP AND end_date > CURRENT_TIMESTAMP
+                        `, [ratedUserId], (err, existingRestriction) => {
+                          if (err) return res.status(500).json({ error: 'Database error.' });
+                          
+                          if (!existingRestriction) {
+                            // Add new restriction
+                            db.run(`
+                              INSERT INTO user_restrictions (user_id, restriction_type, start_date, end_date, reason)
+                              VALUES (?, 'editing_ban', ?, ?, ?)
+                            `, [ratedUserId, startDate, endDate, `Automatic ban due to ${dislikeCount} dislikes`], (err) => {
+                              if (err) console.error('Error creating restriction:', err);
+                            });
+                          }
+                        });
+                      }
+                      
+                      res.json({ success: true, dislike_count: dislikeCount, isUpdate: false });
+                    });
+                });
+            });
         }
-        
-        res.json({ success: true, dislike_count: dislikeCount });
       });
-    });
   });
 });
 

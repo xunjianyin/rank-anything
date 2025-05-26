@@ -545,6 +545,7 @@ async function showObjectPage(objectId) {
         updateBreadcrumb();
         await renderObjectDetails();
         await renderReviews();
+        await loadMyRating();
         resetRatingForm();
         clearSearch();
     } catch (error) {
@@ -1453,8 +1454,41 @@ async function submitRatingToAPI(objectId, rating, review) {
         },
         body: JSON.stringify({ rating, review })
     });
-    if (!res.ok) throw new Error('Failed to submit rating');
+    if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || 'Failed to submit rating');
+    }
     return await res.json();
+}
+
+async function fetchMyObjectRating(objectId) {
+    const token = getAuthToken();
+    const res = await fetch(BACKEND_URL + `/api/objects/${objectId}/my-rating`, {
+        headers: { 'Authorization': 'Bearer ' + token }
+    });
+    if (!res.ok) throw new Error('Failed to fetch my rating');
+    return await res.json();
+}
+
+async function loadMyRating() {
+    if (!currentUser || !currentObjectId) return;
+    
+    try {
+        const result = await fetchMyObjectRating(currentObjectId);
+        if (result.rating) {
+            // Pre-populate the form with existing rating
+            selectedRating = result.rating.rating;
+            document.getElementById('review-text').value = result.rating.review || '';
+            document.getElementById('submit-rating-btn').textContent = 'Update Rating';
+            updateStarDisplay();
+        } else {
+            // No existing rating
+            resetRatingForm();
+        }
+    } catch (error) {
+        console.error('Error loading my rating:', error);
+        resetRatingForm();
+    }
 }
 
 // Replace renderReviews to use API
@@ -1507,27 +1541,21 @@ async function submitRating() {
         return;
     }
     
-    // Check daily limits before proceeding
-    if (!incrementDailyUsage('ratings')) {
-        return;
-    }
-    
     const reviewText = document.getElementById('review-text').value.trim();
     try {
-        await submitRatingToAPI(currentObjectId, selectedRating, reviewText);
+        const result = await submitRatingToAPI(currentObjectId, selectedRating, reviewText);
         await renderObjectDetails();
         await renderReviews();
-        resetRatingForm();
-        showNotification('Rating submitted successfully!');
+        
+        if (result.isUpdate) {
+            showNotification('Rating updated successfully!');
+            document.getElementById('submit-rating-btn').textContent = 'Update Rating';
+        } else {
+            showNotification('Rating submitted successfully!');
+            document.getElementById('submit-rating-btn').textContent = 'Update Rating';
+        }
     } catch (e) {
         alert('Failed to submit rating: ' + e.message);
-        // Revert daily usage increment on failure
-        const usage = getCurrentDailyUsage();
-        usage.ratings = Math.max(0, usage.ratings - 1);
-        data.dailyUsage[currentUser.username] = usage;
-        saveData();
-        updateDailyLimitsDisplay();
-        updateUserInterface();
     }
 }
 
