@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rank Anything</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <div id="app">
+        <!-- Login/Register Modal -->
+        <div class="modal-overlay" id="auth-modal" style="display: none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 id="auth-modal-title">Login</h2>
+                    <button class="modal-close" onclick="closeAuthModal()">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <!-- Login Form -->
+                    <form id="login-form" style="display: block;">
+                        <div class="form-group">
+                            <label for="login-username">Username</label>
+                            <input type="text" id="login-username" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="login-password">Password</label>
+                            <input type="password" id="login-password" required>
+                        </div>
+                        <div class="form-actions">
+                            <button type="button" class="btn btn-primary" onclick="performLogin()">Login</button>
+                            <button type="button" class="btn btn-secondary" onclick="switchToRegister()">Register Instead</button>
+                        </div>
+                    </form>
+                    
+                    <!-- Register Form -->
+                    <form id="register-form" style="display: none;">
+                        <div class="form-group">
+                            <label for="register-username">Username</label>
+                            <input type="text" id="register-username" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="register-email">Email</label>
+                            <input type="email" id="register-email" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="register-password">Password</label>
+                            <input type="password" id="register-password" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="register-password-confirm">Confirm Password</label>
+                            <input type="password" id="register-password-confirm" required>
+                        </div>
+                        <div class="form-actions">
+                            <button type="button" class="btn btn-primary" onclick="performRegister()">Register</button>
+                            <button type="button" class="btn btn-secondary" onclick="switchToLogin()">Login Instead</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <header class="header">
+            <div class="container">
+                <h1 class="logo" onclick="showHomePage()">
+                    <i class="fas fa-star"></i>
+                    Rank Anything
+                </h1>
+                
+                <!-- Search Bar -->
+                <div class="search-container">
+                    <div class="search-input-wrapper">
+                        <input type="text" id="search-input" placeholder="Search topics, objects, and tags..." onkeypress="handleSearchKeypress(event)">
+                        <button class="search-btn" onclick="performSearch()">
+                            <i class="fas fa-search"></i>
+                        </button>
+                        <button class="advanced-search-btn" onclick="toggleAdvancedSearch()" title="Advanced Search">
+                            <i class="fas fa-sliders-h"></i>
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- User Menu -->
+                <div class="user-menu">
+                    <div id="user-info" style="display: none;">
+                        <div class="user-stats">
+                            <span id="daily-limits-display"></span>
+                        </div>
+                        <div class="user-profile">
+                            <i class="fas fa-user"></i>
+                            <span id="username-display"></span>
+                            <span id="admin-badge" style="display:none;color:red;font-weight:bold;margin-left:4px;">(Admin)</span>
+                            <i class="fas fa-chevron-down"></i>
+                        </div>
+                        <div class="user-dropdown" id="user-dropdown" style="display: none;">
+                            <a href="#" onclick="showProposalsPage()">
+                                <i class="fas fa-vote-yea"></i>
+                                Pending Proposals
+                                <span class="proposal-count" id="proposal-count">0</span>
+                            </a>
+                            <a href="#" onclick="showUserSpacePage()">
+                                <i class="fas fa-user-cog"></i>
+                                User Space
+                            </a>
+                            <a href="#" id="admin-panel-link" style="display:none;" onclick="showAdminPanel()">
+                                <i class="fas fa-tools"></i>
+                                Admin Panel
+                            </a>
+                            <a href="#" onclick="logout()">
+                                <i class="fas fa-sign-out-alt"></i>
+                                Logout
+                            </a>
+                        </div>
+                    </div>
+                    <div id="auth-buttons">
+                        <button class="btn btn-secondary" onclick="showLoginModal()">Login</button>
+                        <button class="btn btn-primary" onclick="showRegisterModal()">Register</button>
+                    </div>
+                </div>
+                
+                <nav class="breadcrumb" id="breadcrumb"></nav>
+            </div>
+            
+            <!-- Advanced Search Panel -->
+            <div class="advanced-search-panel" id="advanced-search-panel" style="display: none;">
+                <div class="container">
+                    <div class="advanced-search-content">
+                        <div class="search-type-selector">
+                            <label>Search in:</label>
+                            <select id="search-type">
+                                <option value="all">Everything</option>
+                                <option value="topics">Topics only</option>
+                                <option value="objects">Objects only</option>
+                            </select>
+                        </div>
+                        
+                        <div class="tag-search-section">
+                            <label>Tag Search:</label>
+                            <div class="tag-search-controls">
+                                <input type="text" id="tag-search-input" placeholder="Enter tags (comma-separated)">
+                                <select id="tag-search-logic">
+                                    <option value="and">Has ALL tags</option>
+                                    <option value="or">Has ANY tag</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <div class="search-actions">
+                            <button class="btn btn-primary" onclick="performAdvancedSearch()">Search</button>
+                            <button class="btn btn-secondary" onclick="clearAdvancedSearch()">Clear</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <main class="main">
+            <div class="container">
+                <!-- Home Page -->
+                <div id="home-page" class="page active">
+                    <div class="page-header">
+                        <h2>Topics</h2>
+                        <button class="btn btn-primary" onclick="showAddTopicForm()" id="add-topic-btn">
+                            <i class="fas fa-plus"></i>
+                            Add Topic
+                        </button>
+                    </div>
+                    
+                    <div class="add-topic-form" id="add-topic-form" style="display: none;">
+                        <form onsubmit="addTopic(event)">
+                            <input type="text" id="topic-name" placeholder="Enter topic name" required>
+                            <div class="form-actions">
+                                <button type="submit" class="btn btn-primary">Add Topic</button>
+                                <button type="button" class="btn btn-secondary" onclick="hideAddTopicForm()">Cancel</button>
+                            </div>
+                        </form>
+                    </div>
+
+                    <div class="topics-grid" id="topics-grid">
+                        <!-- Topics will be dynamically populated -->
+                    </div>
+                </div>
+
+                <!-- Topic Details Page -->
+                <div id="topic-page" class="page">
+                    <div class="page-header">
+                        <div class="topic-header-content">
+                            <h2 id="topic-title">Topic Objects</h2>
+                            <div class="topic-actions">
+                                <button class="btn btn-secondary" id="edit-topic-btn" onclick="editTopic()" style="display: none;">
+                                    <i class="fas fa-edit"></i>
+                                    Edit
+                                </button>
+                                <button class="btn btn-danger" id="delete-topic-btn" onclick="deleteTopic()" style="display: none;">
+                                    <i class="fas fa-trash"></i>
+                                    Delete
+                                </button>
+                            </div>
+                        </div>
+                        <button class="btn btn-primary" onclick="showAddObjectForm()" id="add-object-btn">
+                            <i class="fas fa-plus"></i>
+                            Add Object
+                        </button>
+                    </div>
+
+                    <div class="add-object-form" id="add-object-form" style="display: none;">
+                        <form onsubmit="addObject(event)">
+                            <input type="text" id="object-name" placeholder="Enter object name" required>
+                            <input type="text" id="object-tags" placeholder="Enter tags (comma-separated)">
+                            <div class="form-actions">
+                                <button type="submit" class="btn btn-primary">Add Object</button>
+                                <button type="button" class="btn btn-secondary" onclick="hideAddObjectForm()">Cancel</button>
+                            </div>
+                        </form>
+                    </div>
+
+                    <div class="objects-grid" id="objects-grid">
+                        <!-- Objects will be dynamically populated -->
+                    </div>
+                </div>
+
+                <!-- Object Details Page -->
+                <div id="object-page" class="page">
+                    <div class="object-details">
+                        <div class="object-header">
+                            <h2 id="object-title">Object Details</h2>
+                            <div class="object-actions">
+                                <button class="btn btn-secondary" id="edit-object-btn" onclick="editObject()" style="display: none;">
+                                    <i class="fas fa-edit"></i>
+                                    Edit
+                                </button>
+                                <button class="btn btn-danger" id="delete-object-btn" onclick="deleteObject()" style="display: none;">
+                                    <i class="fas fa-trash"></i>
+                                    Delete
+                                </button>
+                                <button class="btn btn-info" id="object-stats-btn" onclick="showObjectStatsPage()">
+                                    <i class="fas fa-chart-bar"></i>
+                                    Statistics
+                                </button>
+                            </div>
+                        </div>
+                        <div class="object-info">
+                            <div class="tags" id="object-tags-display"></div>
+                            <div class="rating-summary" id="rating-summary"></div>
+                        </div>
+                    </div>
+
+                    <div class="rating-section">
+                        <h3>Rate this item</h3>
+                        <div class="star-rating" id="star-rating">
+                            <span class="star" data-rating="1">★</span>
+                            <span class="star" data-rating="2">★</span>
+                            <span class="star" data-rating="3">★</span>
+                            <span class="star" data-rating="4">★</span>
+                            <span class="star" data-rating="5">★</span>
+                        </div>
+                        <textarea id="review-text" placeholder="Write your review (optional)"></textarea>
+                        <button class="btn btn-primary" onclick="submitRating()" id="submit-rating-btn">Submit Rating</button>
+                    </div>
+
+                    <div class="reviews-section">
+                        <h3>Reviews</h3>
+                        <div class="reviews-list" id="reviews-list">
+                            <!-- Reviews will be dynamically populated -->
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Search Results Page -->
+                <div id="search-page" class="page">
+                    <div class="page-header">
+                        <h2 id="search-title">Search Results</h2>
+                        <div class="search-info" id="search-info"></div>
+                    </div>
+                    
+                    <div class="search-results">
+                        <!-- Topics Results -->
+                        <div class="search-section" id="topics-results-section" style="display: none;">
+                            <h3><i class="fas fa-folder"></i> Topics</h3>
+                            <div class="topics-grid" id="search-topics-grid"></div>
+                        </div>
+                        
+                        <!-- Objects Results -->
+                        <div class="search-section" id="objects-results-section" style="display: none;">
+                            <h3><i class="fas fa-cube"></i> Objects</h3>
+                            <div class="objects-grid" id="search-objects-grid"></div>
+                        </div>
+                        
+                        <!-- No Results -->
+                        <div class="empty-state" id="no-search-results" style="display: none;">
+                            <i class="fas fa-search"></i>
+                            <h3>No results found</h3>
+                            <p>Try adjusting your search terms or filters</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Proposals Page -->
+                <div id="proposals-page" class="page">
+                    <div class="page-header">
+                        <h2>Pending Proposals</h2>
+                        <div class="search-info">Community moderation - vote on proposed changes</div>
+                    </div>
+                    <div class="proposals-list" id="proposals-list">
+                        <!-- Proposals will be dynamically populated -->
+                    </div>
+                </div>
+                <div id="user-space-page" class="page">
+                    <div class="container">
+                        <div id="user-space-content"></div>
+                    </div>
+                </div>
+                <div id="object-stats-page" class="page">
+                    <div class="container">
+                        <div id="object-stats-content"></div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <div id="admin-panel-modal" class="modal-overlay" style="display:none;"></div>
+
+    <script src="script.js"></script>
+</body>
+</html> 
