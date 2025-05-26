@@ -53,17 +53,7 @@ const EMAIL_CONFIG_FALLBACK = {
   socketTimeout: 60000
 };
 
-// Gmail fallback configuration (more reliable for cloud hosting)
-const EMAIL_CONFIG_GMAIL = {
-  service: 'gmail',
-  auth: {
-    user: process.env.GMAIL_USER || 'rank.anything.app@gmail.com',
-    pass: process.env.GMAIL_APP_PASSWORD || 'your-app-password-here'
-  },
-  connectionTimeout: 60000,
-  greetingTimeout: 30000,
-  socketTimeout: 60000
-};
+
 
 // Password validation function
 function validatePassword(password) {
@@ -121,31 +111,13 @@ async function sendVerificationEmail(email, code, username) {
       await fallbackTransporter.sendMail(mailOptions);
       console.log('Email sent successfully with fallback configuration');
       return { success: true };
-    } catch (fallbackError) {
-      console.error('Email sending error (fallback config):', fallbackError);
-      
-      // Try Gmail configuration as last resort
-      try {
-        console.log('Trying Gmail fallback configuration...');
-        const gmailTransporter = nodemailer.createTransporter(EMAIL_CONFIG_GMAIL);
-        
-        // Update mailOptions to use Gmail sender
-        const gmailMailOptions = {
-          ...mailOptions,
-          from: process.env.GMAIL_USER || 'rank.anything.app@gmail.com'
-        };
-        
-        await gmailTransporter.sendMail(gmailMailOptions);
-        console.log('Email sent successfully with Gmail configuration');
-        return { success: true };
-      } catch (gmailError) {
-        console.error('Email sending error (Gmail config):', gmailError);
+          } catch (fallbackError) {
+        console.error('Email sending error (fallback config):', fallbackError);
         return { 
           success: false, 
-          error: `All email configurations failed. Primary: ${error.message}, Fallback: ${fallbackError.message}, Gmail: ${gmailError.message}` 
+          error: `Both email configurations failed. Primary: ${error.message}, Fallback: ${fallbackError.message}` 
         };
       }
-    }
   }
 }
 
@@ -208,9 +180,12 @@ app.post('/api/register', validateContent, async (req, res) => {
             }
             
             res.json({ 
-              message: 'Registration successful! Please check your email for verification code.',
+              message: 'Please check your email for verification code to complete registration.',
               userId: userId,
-              requiresVerification: true
+              username: username,
+              email: email,
+              requiresVerification: true,
+              step: 'email_verification'
             });
           });
       });
@@ -346,14 +321,7 @@ app.post('/api/login', (req, res) => {
       return res.status(400).json({ error: 'Invalid email/username or password.' });
     }
     
-    // Check if email is verified (skip for admin user)
-    if (!user.email_verified && user.username !== 'Admin') {
-      return res.status(403).json({ 
-        error: 'Please verify your email before logging in.',
-        requiresVerification: true,
-        userId: user.id
-      });
-    }
+    // Note: Email verification is handled during registration, not login
     
     const token = jwt.sign({ 
       id: user.id, 
