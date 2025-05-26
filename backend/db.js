@@ -89,6 +89,31 @@ const init = () => {
       FOREIGN KEY (user_id) REFERENCES users(id)
     )`);
 
+    // User ratings table for likes/dislikes
+    db.run(`CREATE TABLE IF NOT EXISTS user_ratings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      rated_user_id INTEGER NOT NULL,
+      rater_user_id INTEGER NOT NULL,
+      rating INTEGER NOT NULL CHECK(rating IN (1, -1)), -- 1 for like, -1 for dislike
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (rated_user_id) REFERENCES users(id),
+      FOREIGN KEY (rater_user_id) REFERENCES users(id),
+      UNIQUE(rated_user_id, rater_user_id)
+    )`);
+
+    // User restrictions table for tracking editing bans
+    db.run(`CREATE TABLE IF NOT EXISTS user_restrictions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      restriction_type TEXT NOT NULL, -- 'editing_ban'
+      start_date DATETIME NOT NULL,
+      end_date DATETIME NOT NULL,
+      reason TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )`);
+
     // Add is_admin column if it doesn't exist (migration)
     db.run(`ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0`, (err) => {
       // Ignore error if column already exists

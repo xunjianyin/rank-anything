@@ -87,7 +87,20 @@ app.post('/api/topics', authenticateToken, (req, res) => {
   const { name, tags } = req.body;
   if (!name) return res.status(400).json({ error: 'Name is required.' });
   
-  db.run('INSERT INTO topics (name, creator_id) VALUES (?, ?)', [name, req.user.id], function(err) {
+  // Check if user is restricted from editing
+  db.get(`
+    SELECT * FROM user_restrictions 
+    WHERE user_id = ? AND restriction_type = 'editing_ban' 
+    AND start_date <= CURRENT_TIMESTAMP AND end_date > CURRENT_TIMESTAMP
+  `, [req.user.id], (err, restriction) => {
+    if (err) return res.status(500).json({ error: 'Database error.' });
+    if (restriction) {
+      return res.status(403).json({ 
+        error: 'You are currently restricted from editing until ' + new Date(restriction.end_date).toLocaleString() 
+      });
+    }
+    
+    db.run('INSERT INTO topics (name, creator_id) VALUES (?, ?)', [name, req.user.id], function(err) {
     if (err) return res.status(500).json({ error: 'Database error.' });
     const topicId = this.lastID;
     
@@ -123,14 +136,37 @@ app.post('/api/topics', authenticateToken, (req, res) => {
       });
     }
   });
+  });
 });
 // Edit a topic (only creator or admin)
 app.put('/api/topics/:id', authenticateToken, (req, res) => {
   const { name, tags } = req.body;
   const topicId = req.params.id;
-  db.get('SELECT * FROM topics WHERE id = ?', [topicId], (err, topic) => {
-    if (err || !topic) return res.status(404).json({ error: 'Topic not found.' });
-    if (topic.creator_id !== req.user.id && !req.user.isAdmin) return res.status(403).json({ error: 'Not allowed.' });
+  
+  // Check if user is restricted from editing (unless admin)
+  if (!req.user.isAdmin) {
+    db.get(`
+      SELECT * FROM user_restrictions 
+      WHERE user_id = ? AND restriction_type = 'editing_ban' 
+      AND start_date <= CURRENT_TIMESTAMP AND end_date > CURRENT_TIMESTAMP
+    `, [req.user.id], (err, restriction) => {
+      if (err) return res.status(500).json({ error: 'Database error.' });
+      if (restriction) {
+        return res.status(403).json({ 
+          error: 'You are currently restricted from editing until ' + new Date(restriction.end_date).toLocaleString() 
+        });
+      }
+      
+      performTopicEdit();
+    });
+  } else {
+    performTopicEdit();
+  }
+  
+  function performTopicEdit() {
+    db.get('SELECT * FROM topics WHERE id = ?', [topicId], (err, topic) => {
+      if (err || !topic) return res.status(404).json({ error: 'Topic not found.' });
+      if (topic.creator_id !== req.user.id && !req.user.isAdmin) return res.status(403).json({ error: 'Not allowed.' });
     
     db.run('UPDATE topics SET name = ? WHERE id = ?', [name, topicId], function(err) {
       if (err) return res.status(500).json({ error: 'Database error.' });
@@ -170,6 +206,7 @@ app.put('/api/topics/:id', authenticateToken, (req, res) => {
       }
     });
   });
+  }
 });
 // Delete a topic (only creator or admin)
 app.delete('/api/topics/:id', authenticateToken, (req, res) => {
@@ -198,6 +235,19 @@ app.post('/api/topics/:topicId/objects', authenticateToken, (req, res) => {
   const topicId = req.params.topicId;
   const { name } = req.body;
   if (!name) return res.status(400).json({ error: 'Name is required.' });
+  
+  // Check if user is restricted from editing
+  db.get(`
+    SELECT * FROM user_restrictions 
+    WHERE user_id = ? AND restriction_type = 'editing_ban' 
+    AND start_date <= CURRENT_TIMESTAMP AND end_date > CURRENT_TIMESTAMP
+  `, [req.user.id], (err, restriction) => {
+    if (err) return res.status(500).json({ error: 'Database error.' });
+    if (restriction) {
+      return res.status(403).json({ 
+        error: 'You are currently restricted from editing until ' + new Date(restriction.end_date).toLocaleString() 
+      });
+    }
   
   db.run('INSERT INTO objects (topic_id, name, creator_id) VALUES (?, ?, ?)', [topicId, name, req.user.id], function(err) {
     if (err) return res.status(500).json({ error: 'Database error.' });
@@ -233,19 +283,43 @@ app.post('/api/topics/:topicId/objects', authenticateToken, (req, res) => {
       }
     });
   });
+  });
 });
 // Edit an object (only creator or admin)
 app.put('/api/objects/:id', authenticateToken, (req, res) => {
   const { name } = req.body;
   const objectId = req.params.id;
-  db.get('SELECT * FROM objects WHERE id = ?', [objectId], (err, object) => {
-    if (err || !object) return res.status(404).json({ error: 'Object not found.' });
-    if (object.creator_id !== req.user.id && !req.user.isAdmin) return res.status(403).json({ error: 'Not allowed.' });
+  
+  // Check if user is restricted from editing (unless admin)
+  if (!req.user.isAdmin) {
+    db.get(`
+      SELECT * FROM user_restrictions 
+      WHERE user_id = ? AND restriction_type = 'editing_ban' 
+      AND start_date <= CURRENT_TIMESTAMP AND end_date > CURRENT_TIMESTAMP
+    `, [req.user.id], (err, restriction) => {
+      if (err) return res.status(500).json({ error: 'Database error.' });
+      if (restriction) {
+        return res.status(403).json({ 
+          error: 'You are currently restricted from editing until ' + new Date(restriction.end_date).toLocaleString() 
+        });
+      }
+      
+      performObjectEdit();
+    });
+  } else {
+    performObjectEdit();
+  }
+  
+  function performObjectEdit() {
+    db.get('SELECT * FROM objects WHERE id = ?', [objectId], (err, object) => {
+      if (err || !object) return res.status(404).json({ error: 'Object not found.' });
+      if (object.creator_id !== req.user.id && !req.user.isAdmin) return res.status(403).json({ error: 'Not allowed.' });
     db.run('UPDATE objects SET name = ? WHERE id = ?', [name, objectId], function(err) {
       if (err) return res.status(500).json({ error: 'Database error.' });
       res.json({ success: true });
     });
   });
+  }
 });
 // Delete an object (only creator or admin)
 app.delete('/api/objects/:id', authenticateToken, (req, res) => {
@@ -779,6 +853,146 @@ app.put('/api/users/:id/profile', authenticateToken, (req, res) => {
           });
         });
     });
+});
+
+// --- User Profile and Rating Endpoints ---
+
+// Get public user profile
+app.get('/api/users/:id/profile', (req, res) => {
+  const userId = req.params.id;
+  
+  db.get(`
+    SELECT u.id, u.username, u.created_at,
+           (SELECT COUNT(*) FROM topics WHERE creator_id = u.id) as topic_count,
+           (SELECT COUNT(*) FROM objects WHERE creator_id = u.id) as object_count,
+           (SELECT COUNT(*) FROM ratings WHERE user_id = u.id) as rating_count,
+           (SELECT COUNT(*) FROM user_ratings WHERE rated_user_id = u.id AND rating = 1) as likes,
+           (SELECT COUNT(*) FROM user_ratings WHERE rated_user_id = u.id AND rating = -1) as dislikes
+    FROM users u 
+    WHERE u.id = ?
+  `, [userId], (err, user) => {
+    if (err) return res.status(500).json({ error: 'Database error.' });
+    if (!user) return res.status(404).json({ error: 'User not found.' });
+    
+    // Check if user is currently restricted
+    db.get(`
+      SELECT * FROM user_restrictions 
+      WHERE user_id = ? AND restriction_type = 'editing_ban' 
+      AND start_date <= CURRENT_TIMESTAMP AND end_date > CURRENT_TIMESTAMP
+    `, [userId], (err, restriction) => {
+      if (err) return res.status(500).json({ error: 'Database error.' });
+      
+      user.is_restricted = !!restriction;
+      user.restriction_end = restriction ? restriction.end_date : null;
+      
+      res.json(user);
+    });
+  });
+});
+
+// Rate a user (like/dislike)
+app.post('/api/users/:id/rate', authenticateToken, (req, res) => {
+  const ratedUserId = req.params.id;
+  const { rating } = req.body; // 1 for like, -1 for dislike
+  
+  if (rating !== 1 && rating !== -1) {
+    return res.status(400).json({ error: 'Rating must be 1 (like) or -1 (dislike).' });
+  }
+  
+  if (parseInt(ratedUserId) === req.user.id) {
+    return res.status(400).json({ error: 'Cannot rate yourself.' });
+  }
+  
+  // Check if user exists
+  db.get('SELECT id FROM users WHERE id = ?', [ratedUserId], (err, user) => {
+    if (err) return res.status(500).json({ error: 'Database error.' });
+    if (!user) return res.status(404).json({ error: 'User not found.' });
+    
+    // Insert or update rating
+    db.run(`
+      INSERT INTO user_ratings (rated_user_id, rater_user_id, rating, updated_at) 
+      VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(rated_user_id, rater_user_id) 
+      DO UPDATE SET rating = excluded.rating, updated_at = excluded.updated_at
+    `, [ratedUserId, req.user.id, rating], function(err) {
+      if (err) return res.status(500).json({ error: 'Database error.' });
+      
+      // Check if user should be restricted due to dislikes
+      db.get(`
+        SELECT COUNT(*) as dislike_count 
+        FROM user_ratings 
+        WHERE rated_user_id = ? AND rating = -1
+      `, [ratedUserId], (err, result) => {
+        if (err) return res.status(500).json({ error: 'Database error.' });
+        
+        const dislikeCount = result.dislike_count;
+        
+        // For every 5 dislikes, ban for 1 day
+        if (dislikeCount > 0 && dislikeCount % 5 === 0) {
+          const startDate = new Date().toISOString();
+          const endDate = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(); // 1 day from now
+          
+          // Check if there's already an active restriction
+          db.get(`
+            SELECT * FROM user_restrictions 
+            WHERE user_id = ? AND restriction_type = 'editing_ban' 
+            AND start_date <= CURRENT_TIMESTAMP AND end_date > CURRENT_TIMESTAMP
+          `, [ratedUserId], (err, existingRestriction) => {
+            if (err) return res.status(500).json({ error: 'Database error.' });
+            
+            if (!existingRestriction) {
+              // Add new restriction
+              db.run(`
+                INSERT INTO user_restrictions (user_id, restriction_type, start_date, end_date, reason)
+                VALUES (?, 'editing_ban', ?, ?, ?)
+              `, [ratedUserId, startDate, endDate, `Automatic ban due to ${dislikeCount} dislikes`], (err) => {
+                if (err) console.error('Error creating restriction:', err);
+              });
+            }
+          });
+        }
+        
+        res.json({ success: true, dislike_count: dislikeCount });
+      });
+    });
+  });
+});
+
+// Get user's current rating from the requesting user
+app.get('/api/users/:id/my-rating', authenticateToken, (req, res) => {
+  const ratedUserId = req.params.id;
+  
+  db.get(`
+    SELECT rating FROM user_ratings 
+    WHERE rated_user_id = ? AND rater_user_id = ?
+  `, [ratedUserId, req.user.id], (err, result) => {
+    if (err) return res.status(500).json({ error: 'Database error.' });
+    res.json({ rating: result ? result.rating : null });
+  });
+});
+
+// Check if user is currently restricted from editing
+app.get('/api/users/:id/restrictions', authenticateToken, (req, res) => {
+  const userId = req.params.id;
+  
+  // Only allow users to check their own restrictions or admin to check any
+  if (parseInt(userId) !== req.user.id && !req.user.isAdmin) {
+    return res.status(403).json({ error: 'Access denied.' });
+  }
+  
+  db.get(`
+    SELECT * FROM user_restrictions 
+    WHERE user_id = ? AND restriction_type = 'editing_ban' 
+    AND start_date <= CURRENT_TIMESTAMP AND end_date > CURRENT_TIMESTAMP
+    ORDER BY end_date DESC LIMIT 1
+  `, [userId], (err, restriction) => {
+    if (err) return res.status(500).json({ error: 'Database error.' });
+    
+    res.json({ 
+      is_restricted: !!restriction,
+      restriction: restriction || null
+    });
+  });
 });
 
 app.listen(PORT, () => {

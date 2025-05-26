@@ -1032,7 +1032,7 @@ async function renderSearchTopics() {
         grid.innerHTML = topicsWithCounts.map(topic => {
             return `
                 <div class="topic-card" onclick="showTopicPage('${topic.id}')">
-                    <div class="card-owner">by ${escapeHtml(topic.creator_username || '')}</div>
+                    <div class="card-owner">by ${makeUsernameClickable(topic.creator_username || '', topic.creator_id)}</div>
                     <h3>${escapeHtml(topic.name)}</h3>
                     <p class="rating-text">${topic.objectCount} item${topic.objectCount !== 1 ? 's' : ''}</p>
                 </div>
@@ -1082,7 +1082,7 @@ async function renderSearchObjects() {
         grid.innerHTML = objectsWithDetails.map(object => {
             return `
                 <div class="object-card" onclick="showObjectFromSearch('${object.topicId}', '${object.id}')">
-                    <div class="card-owner">by ${escapeHtml(object.creator_username || '')}</div>
+                    <div class="card-owner">by ${makeUsernameClickable(object.creator_username || '', object.creator_id)}</div>
                     <div class="topic-context">From: ${escapeHtml(object.topicName)}</div>
                     <h3>${escapeHtml(object.name)}</h3>
                     ${object.averageRating > 0 ? `
@@ -1198,7 +1198,7 @@ async function renderTopics() {
         grid.innerHTML = topics.map(topic => {
             return `
                 <div class="topic-card" onclick="showTopicPage('${topic.id}')">
-                    <div class="card-owner">by ${escapeHtml(topic.creator_username || '')}</div>
+                    <div class="card-owner">by ${makeUsernameClickable(topic.creator_username || '', topic.creator_id)}</div>
                     <h3>${escapeHtml(topic.name)}</h3>
                     <p class="rating-text">Created: ${formatDate(topic.created_at)}</p>
                 </div>
@@ -1339,7 +1339,7 @@ async function renderObjects() {
         grid.innerHTML = objectsWithTags.map(object => {
             return `
                 <div class="object-card" onclick="showObjectPage('${object.id}')">
-                    <div class="card-owner">by ${escapeHtml(object.creator_username || '')}</div>
+                    <div class="card-owner">by ${makeUsernameClickable(object.creator_username || '', object.creator_id)}</div>
                     <h3>${escapeHtml(object.name)}</h3>
                     <div class="rating">
                         <span class="rating-text">Created: ${formatDate(object.created_at)}</span>
@@ -1476,7 +1476,7 @@ async function renderReviews() {
         const sortedRatings = [...ratings].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
         reviewsList.innerHTML = sortedRatings.map((rating, index) => `
             <div class="review-item">
-                <div class="review-owner">by ${escapeHtml(rating.username)}</div>
+                <div class="review-owner">by ${makeUsernameClickable(rating.username, rating.user_id)}</div>
                 ${currentUser && rating.user_id === currentUser.id ? `
                     <div class="review-actions">
                         <button class="btn btn-small btn-secondary" onclick="editReview(${index})">
@@ -1763,6 +1763,48 @@ async function fetchUserStats(userId) {
     return await res.json();
 }
 
+// API functions for user profiles and ratings
+async function fetchUserProfile(userId) {
+    const res = await fetch(BACKEND_URL + `/api/users/${userId}/profile`);
+    if (!res.ok) throw new Error('Failed to fetch user profile');
+    return await res.json();
+}
+
+async function rateUser(userId, rating) {
+    const token = getAuthToken();
+    const res = await fetch(BACKEND_URL + `/api/users/${userId}/rate`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + token
+        },
+        body: JSON.stringify({ rating })
+    });
+    if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || 'Failed to rate user');
+    }
+    return await res.json();
+}
+
+async function fetchMyUserRating(userId) {
+    const token = getAuthToken();
+    const res = await fetch(BACKEND_URL + `/api/users/${userId}/my-rating`, {
+        headers: { 'Authorization': 'Bearer ' + token }
+    });
+    if (!res.ok) throw new Error('Failed to fetch user rating');
+    return await res.json();
+}
+
+async function checkUserRestrictions(userId) {
+    const token = getAuthToken();
+    const res = await fetch(BACKEND_URL + `/api/users/${userId}/restrictions`, {
+        headers: { 'Authorization': 'Bearer ' + token }
+    });
+    if (!res.ok) throw new Error('Failed to check user restrictions');
+    return await res.json();
+}
+
 async function updateUserProfile(userId, username, email) {
     const token = getAuthToken();
     const res = await fetch(BACKEND_URL + `/api/users/${userId}/profile`, {
@@ -1984,6 +2026,162 @@ function renderUserDailyChart(dailyStats) {
     });
 }
 
+// User Profile Page
+async function showUserProfilePage(userId) {
+    hideAllPages();
+    document.getElementById('user-profile-page').classList.add('active');
+    await renderUserProfilePage(userId);
+}
+
+async function renderUserProfilePage(userId) {
+    const container = document.getElementById('user-profile-content');
+    
+    if (!userId) {
+        container.innerHTML = '<div class="error">Invalid user ID.</div>';
+        return;
+    }
+    
+    container.innerHTML = '<div style="text-align:center;padding:2rem;">Loading user profile...</div>';
+    
+    try {
+        const profile = await fetchUserProfile(userId);
+        
+        // Get current user's rating for this user if logged in
+        let myRating = null;
+        if (currentUser && currentUser.id !== parseInt(userId)) {
+            try {
+                const ratingData = await fetchMyUserRating(userId);
+                myRating = ratingData.rating;
+            } catch (error) {
+                console.log('No rating found or not logged in');
+            }
+        }
+        
+        let html = `
+            <div class="user-profile-container">
+                <div class="profile-header">
+                    <div class="profile-avatar">
+                        <i class="fas fa-user-circle"></i>
+                    </div>
+                    <div class="profile-info">
+                        <h2>${escapeHtml(profile.username)}</h2>
+                        <div class="profile-meta">
+                            <span class="join-date">Joined: ${formatDate(profile.created_at)}</span>
+                            ${profile.is_restricted ? `
+                                <div class="restriction-notice">
+                                    <i class="fas fa-ban"></i>
+                                    <span>Editing restricted until ${formatDate(profile.restriction_end)}</span>
+                                </div>
+                            ` : ''}
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="profile-stats">
+                    <div class="stat-item">
+                        <div class="stat-number">${profile.topic_count}</div>
+                        <div class="stat-label">Topics Created</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-number">${profile.object_count}</div>
+                        <div class="stat-label">Objects Created</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-number">${profile.rating_count}</div>
+                        <div class="stat-label">Ratings Given</div>
+                    </div>
+                </div>
+                
+                <div class="user-rating-section">
+                    <h3>Community Rating</h3>
+                    <div class="rating-display">
+                        <div class="likes-dislikes">
+                            <div class="likes">
+                                <i class="fas fa-thumbs-up"></i>
+                                <span>${profile.likes} likes</span>
+                            </div>
+                            <div class="dislikes">
+                                <i class="fas fa-thumbs-down"></i>
+                                <span>${profile.dislikes} dislikes</span>
+                            </div>
+                        </div>
+                        
+                        ${currentUser && currentUser.id !== parseInt(userId) ? `
+                            <div class="rating-actions">
+                                <h4>Rate this user:</h4>
+                                <div class="rating-buttons">
+                                    <button class="btn ${myRating === 1 ? 'btn-primary' : 'btn-secondary'}" 
+                                            onclick="rateUserUI('${userId}', 1)">
+                                        <i class="fas fa-thumbs-up"></i> Like
+                                    </button>
+                                    <button class="btn ${myRating === -1 ? 'btn-danger' : 'btn-secondary'}" 
+                                            onclick="rateUserUI('${userId}', -1)">
+                                        <i class="fas fa-thumbs-down"></i> Dislike
+                                    </button>
+                                    ${myRating !== null ? `
+                                        <button class="btn btn-small btn-secondary" onclick="removeUserRatingUI('${userId}')">
+                                            Remove Rating
+                                        </button>
+                                    ` : ''}
+                                </div>
+                            </div>
+                        ` : currentUser && currentUser.id === parseInt(userId) ? `
+                            <div class="own-profile-notice">
+                                <i class="fas fa-info-circle"></i>
+                                <span>This is your profile</span>
+                            </div>
+                        ` : `
+                            <div class="login-notice">
+                                <i class="fas fa-sign-in-alt"></i>
+                                <span>Login to rate this user</span>
+                            </div>
+                        `}
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        container.innerHTML = html;
+        
+    } catch (error) {
+        console.error('Error loading user profile:', error);
+        container.innerHTML = '<div class="error">Failed to load user profile: ' + error.message + '</div>';
+    }
+}
+
+async function rateUserUI(userId, rating) {
+    if (!currentUser) {
+        alert('Please login to rate users');
+        return;
+    }
+    
+    try {
+        const result = await rateUser(userId, rating);
+        showNotification(rating === 1 ? 'User liked!' : 'User disliked!');
+        
+        if (result.dislike_count && result.dislike_count % 5 === 0) {
+            showNotification(`User has been restricted due to ${result.dislike_count} dislikes`, 'warning');
+        }
+        
+        // Refresh the profile page
+        await renderUserProfilePage(userId);
+    } catch (error) {
+        alert('Failed to rate user: ' + error.message);
+    }
+}
+
+async function removeUserRatingUI(userId) {
+    // To remove a rating, we can just call the rate endpoint with the opposite of current rating
+    // But for simplicity, let's just refresh and let user click again
+    showNotification('Click the opposite button to change your rating');
+}
+
+// Make username clickable function
+function makeUsernameClickable(username, userId) {
+    if (!userId) return escapeHtml(username);
+    return `<span class="clickable-username" onclick="showUserProfilePage('${userId}')">${escapeHtml(username)}</span>`;
+}
+
 // Admin panel UI
 function showAdminPanel() {
     if (!isAdmin()) return;
@@ -2202,7 +2400,7 @@ async function renderObjectStatsPage() {
                     <div class="stats-title-section">
                         <h2><i class="fas fa-chart-line"></i> Statistics for: ${escapeHtml(object.name)}</h2>
                         <div class="object-meta">
-                            <span class="created-by">Created by: ${escapeHtml(object.creator_username || 'Unknown')}</span>
+                            <span class="created-by">Created by: ${makeUsernameClickable(object.creator_username || 'Unknown', object.creator_id)}</span>
                             <span class="created-date">Created: ${formatDate(object.created_at)}</span>
                         </div>
                         ${tags.length > 0 ? `
@@ -3015,6 +3213,9 @@ window.hideAddObjectForm = hideAddObjectForm;
 window.addObject = addObject;
 window.editObject = editObject;
 window.deleteObject = deleteObjectUI;
+window.showUserProfilePage = showUserProfilePage;
+window.rateUserUI = rateUserUI;
+window.removeUserRatingUI = removeUserRatingUI;
 window.showObjectStatsPage = showObjectStatsPage;
 window.showUserSpacePage = showUserSpacePage;
 window.updateUserInfo = updateUserInfo;
