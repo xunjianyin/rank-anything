@@ -200,6 +200,10 @@
                                     <i class="fas fa-trash"></i>
                                     Delete
                                 </button>
+                                <button class="btn btn-info" id="topic-stats-btn" onclick="showTopicStatsPage()">
+                                    <i class="fas fa-chart-line"></i>
+                                    Statistics
+                                </button>
                             </div>
                         </div>
                         <button class="btn btn-primary" onclick="showAddObjectForm()" id="add-object-btn">
@@ -369,6 +373,12 @@
                 <div id="object-stats-page" class="page">
                     <div class="object-stats-container">
                         <div id="object-stats-content"></div>
+                    </div>
+                </div>
+                
+                <div id="topic-stats-page" class="page">
+                    <div class="object-stats-container">
+                        <div id="topic-stats-content"></div>
                     </div>
                 </div>
             </div>

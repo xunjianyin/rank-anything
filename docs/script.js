@@ -2346,6 +2346,12 @@ async function showObjectStatsPage() {
     document.getElementById('object-stats-page').classList.add('active');
     await renderObjectStatsPage();
 }
+
+async function showTopicStatsPage() {
+    hideAllPages();
+    document.getElementById('topic-stats-page').classList.add('active');
+    await renderTopicStatsPage();
+}
 async function renderObjectStatsPage() {
     const container = document.getElementById('object-stats-content');
     
@@ -2787,6 +2793,477 @@ async function renderObjectStatsPage() {
     }
 }
 
+async function renderTopicStatsPage() {
+    const container = document.getElementById('topic-stats-content');
+    
+    try {
+        const topic = await fetchTopic(currentTopicId);
+        const objects = await fetchObjects(currentTopicId);
+        const topicTags = await fetchTopicTags(currentTopicId);
+        
+        if (!topic) {
+            container.innerHTML = '<div class="error">Topic not found</div>';
+            return;
+        }
+        
+        // Chart.js loader
+        if (!window.Chart) {
+            const script = document.createElement('script');
+            script.src = 'https://cdn.jsdelivr.net/npm/chart.js';
+            script.onload = () => renderTopicStatsPage();
+            document.body.appendChild(script);
+            container.innerHTML = '<div style="text-align:center;padding:2rem;">Loading charts...</div>';
+            return;
+        }
+        
+        // Fetch all ratings for all objects in this topic
+        const allRatings = [];
+        const objectRatings = {};
+        const objectDetails = {};
+        
+        for (const object of objects) {
+            const ratings = await fetchRatings(object.id);
+            allRatings.push(...ratings);
+            objectRatings[object.id] = ratings;
+            objectDetails[object.id] = object;
+        }
+        
+        // Calculate comprehensive statistics
+        const totalObjects = objects.length;
+        const totalRatings = allRatings.length;
+        const averageTopicRating = totalRatings > 0 ? allRatings.reduce((sum, r) => sum + r.rating, 0) / totalRatings : 0;
+        const uniqueReviewers = new Set(allRatings.map(r => r.user_id)).size;
+        const ratingsWithReviews = allRatings.filter(r => r.review && r.review.trim()).length;
+        
+        // Object rankings by average rating
+        const objectRankings = objects.map(obj => {
+            const ratings = objectRatings[obj.id] || [];
+            const avgRating = ratings.length > 0 ? ratings.reduce((sum, r) => sum + r.rating, 0) / ratings.length : 0;
+            return {
+                ...obj,
+                avgRating,
+                totalRatings: ratings.length,
+                ratingsWithReviews: ratings.filter(r => r.review && r.review.trim()).length
+            };
+        }).sort((a, b) => b.avgRating - a.avgRating);
+        
+        // Most active objects (by rating count)
+        const mostActiveObjects = [...objectRankings].sort((a, b) => b.totalRatings - a.totalRatings);
+        
+        // Rating distribution across all objects
+        const ratingCounts = [0, 0, 0, 0, 0];
+        allRatings.forEach(r => {
+            if (r.rating >= 1 && r.rating <= 5) ratingCounts[r.rating - 1]++;
+        });
+        
+        // Time-based analysis
+        const mostRecentRating = allRatings.length > 0 ? new Date(Math.max(...allRatings.map(r => new Date(r.created_at)))) : null;
+        const oldestRating = allRatings.length > 0 ? new Date(Math.min(...allRatings.map(r => new Date(r.created_at)))) : null;
+        
+        // Activity over time (last 30 days)
+        const thirtyDaysAgo = new Date();
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+        const recentRatings = allRatings.filter(r => new Date(r.created_at) >= thirtyDaysAgo);
+        
+        // Create comprehensive HTML layout
+        let html = `
+            <div class="object-stats-container">
+                <!-- Header Section -->
+                <div class="stats-header">
+                    <div class="stats-title-section">
+                        <h2><i class="fas fa-chart-line"></i> Topic Statistics: ${escapeHtml(topic.name)}</h2>
+                        <div class="object-meta">
+                            <span class="created-by">Created by: ${makeUsernameClickable(topic.creator_username || 'Unknown', topic.creator_id)}</span>
+                            <span class="created-date">Created: ${formatDate(topic.created_at)}</span>
+                        </div>
+                        ${topicTags.length > 0 ? `
+                            <div class="object-tags">
+                                ${topicTags.map(tag => `<span class="tag">${escapeHtml(tag.name)}</span>`).join('')}
+                            </div>
+                        ` : ''}
+                    </div>
+                </div>
+                
+                <!-- Key Statistics Cards -->
+                <div class="stats-overview">
+                    <div class="stat-card primary">
+                        <div class="stat-icon"><i class="fas fa-star"></i></div>
+                        <div class="stat-content">
+                            <div class="stat-number">${averageTopicRating > 0 ? averageTopicRating.toFixed(2) : 'N/A'}</div>
+                            <div class="stat-label">Average Topic Rating</div>
+                            ${averageTopicRating > 0 ? `<div class="stat-stars">${renderStars(averageTopicRating)}</div>` : ''}
+                        </div>
+                    </div>
+                    
+                    <div class="stat-card secondary">
+                        <div class="stat-icon"><i class="fas fa-cubes"></i></div>
+                        <div class="stat-content">
+                            <div class="stat-number">${totalObjects}</div>
+                            <div class="stat-label">Total Objects</div>
+                            <div class="stat-detail">${totalRatings} total ratings</div>
+                        </div>
+                    </div>
+                    
+                    <div class="stat-card tertiary">
+                        <div class="stat-icon"><i class="fas fa-users"></i></div>
+                        <div class="stat-content">
+                            <div class="stat-number">${uniqueReviewers}</div>
+                            <div class="stat-label">Unique Reviewers</div>
+                            <div class="stat-detail">${ratingsWithReviews} written reviews</div>
+                        </div>
+                    </div>
+                    
+                    <div class="stat-card quaternary">
+                        <div class="stat-icon"><i class="fas fa-chart-bar"></i></div>
+                        <div class="stat-content">
+                            <div class="stat-number">${recentRatings.length}</div>
+                            <div class="stat-label">Recent Activity</div>
+                            <div class="stat-detail">Last 30 days</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Charts Section -->
+                <div class="charts-container">
+                    <!-- Object Rankings -->
+                    <div class="chart-section full-width">
+                        <div class="chart-header">
+                            <h3><i class="fas fa-trophy"></i> Object Rankings by Average Rating</h3>
+                            <div class="chart-info">
+                                Top-rated objects in this topic
+                            </div>
+                        </div>
+                        <div class="chart-wrapper">
+                            <canvas id="topic-rankings-chart"></canvas>
+                        </div>
+                    </div>
+                    
+                    <!-- Rating Distribution -->
+                    <div class="chart-section">
+                        <div class="chart-header">
+                            <h3><i class="fas fa-chart-bar"></i> Overall Rating Distribution</h3>
+                            <div class="chart-info">
+                                All ratings across topic objects
+                            </div>
+                        </div>
+                        <div class="chart-wrapper">
+                            <canvas id="topic-ratings-bar-chart"></canvas>
+                        </div>
+                    </div>
+                    
+                    <!-- Activity Distribution -->
+                    <div class="chart-section">
+                        <div class="chart-header">
+                            <h3><i class="fas fa-chart-pie"></i> Object Activity Distribution</h3>
+                            <div class="chart-info">
+                                Rating count per object
+                            </div>
+                        </div>
+                        <div class="chart-wrapper">
+                            <canvas id="topic-activity-chart"></canvas>
+                        </div>
+                    </div>
+                    
+                    <!-- Rating Trends Over Time -->
+                    <div class="chart-section full-width">
+                        <div class="chart-header">
+                            <h3><i class="fas fa-chart-line"></i> Rating Activity Over Time</h3>
+                            <div class="chart-info">
+                                Number of ratings submitted over time
+                            </div>
+                        </div>
+                        <div class="chart-wrapper">
+                            <canvas id="topic-timeline-chart"></canvas>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Detailed Rankings Table -->
+                <div class="detailed-stats">
+                    <h3><i class="fas fa-list-ol"></i> Detailed Object Rankings</h3>
+                    <div class="stats-table">
+                        ${objectRankings.map((obj, index) => `
+                            <div class="stats-row ${index === 0 ? 'highlight' : ''}" onclick="showObjectFromSearch(${currentTopicId}, ${obj.id})" style="cursor: pointer;">
+                                <span class="stats-label">
+                                    <strong>#${index + 1}</strong> ${escapeHtml(obj.name)}
+                                    ${obj.avgRating > 0 ? `<span style="color: #ffd700; margin-left: 0.5rem;">${renderStars(obj.avgRating)}</span>` : ''}
+                                </span>
+                                <span class="stats-value">
+                                    ${obj.avgRating > 0 ? obj.avgRating.toFixed(2) : 'No ratings'} 
+                                    (${obj.totalRatings} rating${obj.totalRatings !== 1 ? 's' : ''})
+                                </span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+                
+                <!-- Most Active Objects -->
+                <div class="detailed-stats">
+                    <h3><i class="fas fa-fire"></i> Most Active Objects</h3>
+                    <div class="stats-table">
+                        ${mostActiveObjects.slice(0, 10).map((obj, index) => `
+                            <div class="stats-row" onclick="showObjectFromSearch(${currentTopicId}, ${obj.id})" style="cursor: pointer;">
+                                <span class="stats-label">
+                                    <strong>#${index + 1}</strong> ${escapeHtml(obj.name)}
+                                </span>
+                                <span class="stats-value">
+                                    ${obj.totalRatings} rating${obj.totalRatings !== 1 ? 's' : ''} 
+                                    (${obj.ratingsWithReviews} review${obj.ratingsWithReviews !== 1 ? 's' : ''})
+                                </span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+                
+                <!-- Summary Statistics -->
+                <div class="detailed-stats">
+                    <h3><i class="fas fa-info-circle"></i> Summary Statistics</h3>
+                    <div class="stats-table">
+                        <div class="stats-row">
+                            <span class="stats-label">Total Objects:</span>
+                            <span class="stats-value">${totalObjects}</span>
+                        </div>
+                        <div class="stats-row">
+                            <span class="stats-label">Total Ratings:</span>
+                            <span class="stats-value">${totalRatings}</span>
+                        </div>
+                        <div class="stats-row">
+                            <span class="stats-label">Average Ratings per Object:</span>
+                            <span class="stats-value">${totalObjects > 0 ? (totalRatings / totalObjects).toFixed(1) : '0'}</span>
+                        </div>
+                        <div class="stats-row">
+                            <span class="stats-label">Objects with Ratings:</span>
+                            <span class="stats-value">${objectRankings.filter(obj => obj.totalRatings > 0).length} of ${totalObjects}</span>
+                        </div>
+                        <div class="stats-row">
+                            <span class="stats-label">Review Coverage:</span>
+                            <span class="stats-value">${totalRatings > 0 ? Math.round((ratingsWithReviews / totalRatings) * 100) : 0}% of ratings have reviews</span>
+                        </div>
+                        <div class="stats-row highlight">
+                            <span class="stats-label">Most Common Rating:</span>
+                            <span class="stats-value">${totalRatings > 0 ? (ratingCounts.indexOf(Math.max(...ratingCounts)) + 1) + ' Stars' : 'N/A'}</span>
+                        </div>
+                        ${mostRecentRating ? `
+                            <div class="stats-row">
+                                <span class="stats-label">Latest Activity:</span>
+                                <span class="stats-value">${formatDate(mostRecentRating)}</span>
+                            </div>
+                        ` : ''}
+                        ${oldestRating ? `
+                            <div class="stats-row">
+                                <span class="stats-label">First Rating:</span>
+                                <span class="stats-value">${formatDate(oldestRating)}</span>
+                            </div>
+                        ` : ''}
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        container.innerHTML = html;
+        
+        // Create Object Rankings Chart
+        const rankingsCtx = document.getElementById('topic-rankings-chart').getContext('2d');
+        const topObjects = objectRankings.slice(0, 10); // Top 10 objects
+        new Chart(rankingsCtx, {
+            type: 'bar',
+            data: {
+                labels: topObjects.map(obj => obj.name.length > 20 ? obj.name.substring(0, 20) + '...' : obj.name),
+                datasets: [{
+                    label: 'Average Rating',
+                    data: topObjects.map(obj => obj.avgRating),
+                    backgroundColor: topObjects.map((_, index) => {
+                        const colors = ['#ffd700', '#c0c0c0', '#cd7f32', '#6366f1', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#06b6d4', '#84cc16'];
+                        return colors[index] || '#6b7280';
+                    }),
+                    borderColor: '#ffffff',
+                    borderWidth: 2
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const obj = topObjects[context.dataIndex];
+                                return `${obj.avgRating.toFixed(2)} stars (${obj.totalRatings} rating${obj.totalRatings !== 1 ? 's' : ''})`;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: { 
+                        min: 0, 
+                        max: 5, 
+                        ticks: { stepSize: 1 },
+                        title: { display: true, text: 'Average Rating' }
+                    },
+                    x: { 
+                        ticks: { maxRotation: 45 },
+                        title: { display: true, text: 'Objects' }
+                    }
+                }
+            }
+        });
+        
+        // Create Rating Distribution Chart
+        const ratingsBarCtx = document.getElementById('topic-ratings-bar-chart').getContext('2d');
+        new Chart(ratingsBarCtx, {
+            type: 'bar',
+            data: {
+                labels: ['1 Star', '2 Stars', '3 Stars', '4 Stars', '5 Stars'],
+                datasets: [{
+                    label: 'Number of Ratings',
+                    data: ratingCounts,
+                    backgroundColor: ['#f87171', '#fbbf24', '#facc15', '#34d399', '#60a5fa'],
+                    borderColor: '#ffffff',
+                    borderWidth: 2
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { 
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const total = ratingCounts.reduce((a, b) => a + b, 0);
+                                const percentage = total > 0 ? Math.round((context.parsed.y / total) * 100) : 0;
+                                return `${context.parsed.y} ratings (${percentage}%)`;
+                            }
+                        }
+                    }
+                },
+                scales: { 
+                    y: { 
+                        beginAtZero: true, 
+                        precision: 0,
+                        title: { display: true, text: 'Number of Ratings' }
+                    },
+                    x: {
+                        title: { display: true, text: 'Rating' }
+                    }
+                }
+            }
+        });
+        
+        // Create Activity Distribution Chart
+        const activityCtx = document.getElementById('topic-activity-chart').getContext('2d');
+        const activityData = mostActiveObjects.slice(0, 8).map(obj => obj.totalRatings);
+        const activityLabels = mostActiveObjects.slice(0, 8).map(obj => obj.name.length > 15 ? obj.name.substring(0, 15) + '...' : obj.name);
+        
+        new Chart(activityCtx, {
+            type: 'doughnut',
+            data: {
+                labels: activityLabels,
+                datasets: [{
+                    data: activityData,
+                    backgroundColor: [
+                        '#6366f1', '#8b5cf6', '#10b981', '#f59e0b', 
+                        '#ef4444', '#06b6d4', '#84cc16', '#f97316'
+                    ],
+                    borderColor: '#ffffff',
+                    borderWidth: 2
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                        labels: { padding: 15, usePointStyle: true }
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const total = activityData.reduce((a, b) => a + b, 0);
+                                const percentage = total > 0 ? Math.round((context.parsed / total) * 100) : 0;
+                                return `${context.label}: ${context.parsed} ratings (${percentage}%)`;
+                            }
+                        }
+                    }
+                },
+                cutout: '50%'
+            }
+        });
+        
+        // Create Timeline Chart
+        const timelineCtx = document.getElementById('topic-timeline-chart').getContext('2d');
+        
+        // Group ratings by day for the last 30 days
+        const dailyRatings = {};
+        const last30Days = [];
+        for (let i = 29; i >= 0; i--) {
+            const date = new Date();
+            date.setDate(date.getDate() - i);
+            const dateStr = date.toISOString().split('T')[0];
+            last30Days.push(dateStr);
+            dailyRatings[dateStr] = 0;
+        }
+        
+        allRatings.forEach(rating => {
+            const dateStr = new Date(rating.created_at).toISOString().split('T')[0];
+            if (dailyRatings.hasOwnProperty(dateStr)) {
+                dailyRatings[dateStr]++;
+            }
+        });
+        
+        new Chart(timelineCtx, {
+            type: 'line',
+            data: {
+                labels: last30Days.map(date => new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })),
+                datasets: [{
+                    label: 'Ratings per Day',
+                    data: last30Days.map(date => dailyRatings[date]),
+                    borderColor: '#6366f1',
+                    backgroundColor: 'rgba(99, 102, 241, 0.1)',
+                    fill: true,
+                    tension: 0.3,
+                    pointBackgroundColor: '#6366f1',
+                    pointBorderColor: '#ffffff',
+                    pointBorderWidth: 2,
+                    pointRadius: 4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: true },
+                    tooltip: {
+                        mode: 'index',
+                        intersect: false
+                    }
+                },
+                scales: {
+                    y: { 
+                        beginAtZero: true, 
+                        precision: 0,
+                        title: { display: true, text: 'Number of Ratings' }
+                    },
+                    x: { 
+                        title: { display: true, text: 'Date' }
+                    }
+                },
+                interaction: {
+                    mode: 'nearest',
+                    axis: 'x',
+                    intersect: false
+                }
+            }
+        });
+        
+    } catch (error) {
+        console.error('Error rendering topic statistics:', error);
+        container.innerHTML = '<div class="error">Failed to load statistics: ' + error.message + '</div>';
+    }
+}
+
 async function updateProposalCount() {
     try {
         const proposals = await fetchProposals('pending');
@@ -3217,6 +3694,7 @@ window.showUserProfilePage = showUserProfilePage;
 window.rateUserUI = rateUserUI;
 window.removeUserRatingUI = removeUserRatingUI;
 window.showObjectStatsPage = showObjectStatsPage;
+window.showTopicStatsPage = showTopicStatsPage;
 window.showUserSpacePage = showUserSpacePage;
 window.updateUserInfo = updateUserInfo;
 // Add more as needed for other UI functions referenced in HTML
