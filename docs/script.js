@@ -213,6 +213,7 @@ async function fetchCurrentUser() {
 function loginUser(user, token) {
     currentUser = user;
     saveAuthToken(token);
+    resetDailyUsageIfNeeded();
     updateUserInterface();
     // No more localStorage.setItem('currentUser', ...)
 }
@@ -231,6 +232,7 @@ async function checkUserSession() {
         try {
             const payload = JSON.parse(atob(token.split('.')[1]));
             currentUser = payload;
+            resetDailyUsageIfNeeded();
             updateUserInterface();
         } catch (e) {
             clearAuthToken();
@@ -1214,6 +1216,12 @@ async function addTopic(event) {
         alert('Please login to add topics');
         return;
     }
+    
+    // Check daily limits before proceeding
+    if (!incrementDailyUsage('topics')) {
+        return;
+    }
+    
     const topicName = document.getElementById('topic-name').value.trim();
     const topicTagsStr = document.getElementById('topic-tags').value.trim();
     if (!topicName) return;
@@ -1227,6 +1235,13 @@ async function addTopic(event) {
         showNotification('Topic created!');
     } catch (e) {
         alert('Failed to create topic: ' + e.message);
+        // Revert daily usage increment on failure
+        const usage = getCurrentDailyUsage();
+        usage.topics = Math.max(0, usage.topics - 1);
+        data.dailyUsage[currentUser.username] = usage;
+        saveData();
+        updateDailyLimitsDisplay();
+        updateUserInterface();
     }
 }
 
@@ -1349,6 +1364,12 @@ async function addObject(event) {
         alert('Please login to add objects');
         return;
     }
+    
+    // Check daily limits before proceeding
+    if (!incrementDailyUsage('objects')) {
+        return;
+    }
+    
     const objectName = document.getElementById('object-name').value.trim();
     const objectTagsStr = document.getElementById('object-tags').value.trim();
     if (!objectName) return;
@@ -1375,6 +1396,13 @@ async function addObject(event) {
         showNotification('Object created!');
     } catch (e) {
         alert('Failed to create object: ' + e.message);
+        // Revert daily usage increment on failure
+        const usage = getCurrentDailyUsage();
+        usage.objects = Math.max(0, usage.objects - 1);
+        data.dailyUsage[currentUser.username] = usage;
+        saveData();
+        updateDailyLimitsDisplay();
+        updateUserInterface();
     }
 }
 
@@ -1478,6 +1506,12 @@ async function submitRating() {
         alert('Please select a rating');
         return;
     }
+    
+    // Check daily limits before proceeding
+    if (!incrementDailyUsage('ratings')) {
+        return;
+    }
+    
     const reviewText = document.getElementById('review-text').value.trim();
     try {
         await submitRatingToAPI(currentObjectId, selectedRating, reviewText);
@@ -1487,6 +1521,13 @@ async function submitRating() {
         showNotification('Rating submitted successfully!');
     } catch (e) {
         alert('Failed to submit rating: ' + e.message);
+        // Revert daily usage increment on failure
+        const usage = getCurrentDailyUsage();
+        usage.ratings = Math.max(0, usage.ratings - 1);
+        data.dailyUsage[currentUser.username] = usage;
+        saveData();
+        updateDailyLimitsDisplay();
+        updateUserInterface();
     }
 }
 
@@ -1606,111 +1647,8 @@ function showNotification(message) {
     }, 3000);
 }
 
-// Sample data for demonstration (optional)
-function loadSampleData() {
-    if (Object.keys(data.users).length === 0) {
-        const sampleData = {
-            users: {
-                'john': {
-                    username: 'john',
-                    email: 'john@example.com',
-                    password: 'password123',
-                    joinedAt: new Date().toISOString()
-                },
-                'alice': {
-                    username: 'alice',
-                    email: 'alice@example.com',
-                    password: 'password123',
-                    joinedAt: new Date().toISOString()
-                }
-            },
-            topics: [
-                {
-                    id: 'topic1',
-                    name: 'Peking University Cafeteria Dishes',
-                    createdAt: new Date().toISOString(),
-                    createdBy: 'john',
-                    type: 'topic'
-                },
-                {
-                    id: 'topic2',
-                    name: 'Favorite Movies',
-                    createdAt: new Date().toISOString(),
-                    createdBy: 'alice',
-                    type: 'topic'
-                }
-            ],
-            objects: {
-                'topic1': [
-                    {
-                        id: 'obj1',
-                        name: 'Shaoyuan Cafeteria Yellow Braised Chicken',
-                        tags: ['Peking University', 'Cafeteria', 'Shaoyuan', 'Yellow Braised Chicken', 'Mildly Spicy', 'Chicken'],
-                        createdAt: new Date().toISOString(),
-                        createdBy: 'john',
-                        type: 'object'
-                    },
-                    {
-                        id: 'obj2',
-                        name: 'Student Canteen Beef Noodles',
-                        tags: ['Peking University', 'Cafeteria', 'Student Canteen', 'Beef', 'Noodles', 'Spicy'],
-                        createdAt: new Date().toISOString(),
-                        createdBy: 'alice',
-                        type: 'object'
-                    }
-                ],
-                'topic2': [
-                    {
-                        id: 'obj3',
-                        name: 'The Matrix',
-                        tags: ['Sci-Fi', 'Action', '1999', 'Keanu Reeves'],
-                        createdAt: new Date().toISOString(),
-                        createdBy: 'alice',
-                        type: 'object'
-                    }
-                ]
-            },
-            ratings: {
-                'topic1': {
-                    'obj1': [
-                        {
-                            rating: 4,
-                            review: 'Really tasty and well-seasoned! The chicken is tender and the sauce is flavorful.',
-                            createdAt: new Date().toISOString(),
-                            createdBy: 'john'
-                        }
-                    ],
-                    'obj2': [
-                        {
-                            rating: 5,
-                            review: 'Amazing beef noodles! Perfect spice level.',
-                            createdAt: new Date().toISOString(),
-                            createdBy: 'alice'
-                        }
-                    ]
-                },
-                'topic2': {
-                    'obj3': [
-                        {
-                            rating: 5,
-                            review: 'A masterpiece of science fiction cinema!',
-                            createdAt: new Date().toISOString(),
-                            createdBy: 'alice'
-                        }
-                    ]
-                }
-            },
-            proposals: {},
-            dailyUsage: {}
-        };
-        
-        data = sampleData;
-        saveData();
-    }
-}
-
-// Uncomment the line below to load sample data on first visit
-// loadSampleData(); 
+// Note: Sample data function removed as we now use backend API for all data
+// Daily usage tracking still uses local storage for client-side rate limiting 
 
 // User Space Modal
 async function showUserSpacePage() {
