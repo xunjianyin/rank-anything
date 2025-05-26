@@ -566,7 +566,7 @@ function showProposalsPage() {
     document.getElementById('proposals-page').classList.add('active');
     
     updateBreadcrumb();
-    renderProposals();
+    document.renderProposals();
     toggleUserMenu(); // Close the dropdown
 }
 
@@ -633,21 +633,31 @@ function updateTopicActions(topic) {
             proposeEditBtn.id = proposeEditBtnId;
             proposeEditBtn.className = 'btn btn-small btn-secondary';
             proposeEditBtn.textContent = 'Propose Edit';
-            proposeEditBtn.onclick = function() {
+            proposeEditBtn.onclick = async function() {
                 const newName = prompt('Enter new topic name:', topic.name);
                 if (!newName || newName.trim() === '' || newName.trim() === topic.name) return;
-                createProposal('edit-topic', topic.id, { name: newName.trim() });
-                showNotification('Edit proposal submitted for community voting');
+                try {
+                    await createProposal('edit', 'topic', topic.id, newName.trim(), 'User proposed topic name change');
+                    showNotification('Edit proposal submitted for community voting');
+                    updateProposalCount();
+                } catch (error) {
+                    alert('Failed to create proposal: ' + error.message);
+                }
             };
             editBtn.parentNode.insertBefore(proposeEditBtn, editBtn.nextSibling);
             proposeDeleteBtn = document.createElement('button');
             proposeDeleteBtn.id = proposeDeleteBtnId;
             proposeDeleteBtn.className = 'btn btn-small btn-danger';
             proposeDeleteBtn.textContent = 'Propose Delete';
-            proposeDeleteBtn.onclick = function() {
+            proposeDeleteBtn.onclick = async function() {
                 if (!confirm('Are you sure you want to propose deletion of this topic?')) return;
-                createProposal('delete-topic', topic.id, {});
-                showNotification('Deletion proposal submitted for community voting');
+                try {
+                    await createProposal('delete', 'topic', topic.id, null, 'User proposed topic deletion');
+                    showNotification('Deletion proposal submitted for community voting');
+                    updateProposalCount();
+                } catch (error) {
+                    alert('Failed to create proposal: ' + error.message);
+                }
             };
             deleteBtn.parentNode.insertBefore(proposeDeleteBtn, deleteBtn.nextSibling);
         }
@@ -677,25 +687,37 @@ function updateObjectActions(object) {
             proposeEditBtn.id = proposeEditBtnId;
             proposeEditBtn.className = 'btn btn-small btn-secondary';
             proposeEditBtn.textContent = 'Propose Edit';
-            proposeEditBtn.onclick = function() {
+            proposeEditBtn.onclick = async function() {
                 const newName = prompt('Enter new object name:', object.name);
                 if (!newName || newName.trim() === '') return;
-                const newTagsStr = prompt('Enter tags (comma-separated):', object.tags.join(', '));
+                const currentTags = await fetchObjectTags(object.id);
+                const currentTagNames = currentTags.map(tag => tag.name);
+                const newTagsStr = prompt('Enter tags (comma-separated):', currentTagNames.join(', '));
                 if (newTagsStr === null) return;
                 const newTags = newTagsStr ? newTagsStr.split(',').map(tag => tag.trim()).filter(tag => tag) : [];
-                if (newName.trim() === object.name && JSON.stringify(newTags) === JSON.stringify(object.tags)) return;
-                createProposal('edit-object', object.id, { name: newName.trim(), tags: newTags }, currentTopicId);
-                showNotification('Edit proposal submitted for community voting');
+                if (newName.trim() === object.name && JSON.stringify(newTags) === JSON.stringify(currentTagNames)) return;
+                try {
+                    await createProposal('edit', 'object', object.id, JSON.stringify({ name: newName.trim(), tags: newTags }), 'User proposed object edit');
+                    showNotification('Edit proposal submitted for community voting');
+                    updateProposalCount();
+                } catch (error) {
+                    alert('Failed to create proposal: ' + error.message);
+                }
             };
             editBtn.parentNode.insertBefore(proposeEditBtn, editBtn.nextSibling);
             proposeDeleteBtn = document.createElement('button');
             proposeDeleteBtn.id = proposeDeleteBtnId;
             proposeDeleteBtn.className = 'btn btn-small btn-danger';
             proposeDeleteBtn.textContent = 'Propose Delete';
-            proposeDeleteBtn.onclick = function() {
+            proposeDeleteBtn.onclick = async function() {
                 if (!confirm('Are you sure you want to propose deletion of this object?')) return;
-                createProposal('delete-object', object.id, {}, currentTopicId);
-                showNotification('Deletion proposal submitted for community voting');
+                try {
+                    await createProposal('delete', 'object', object.id, null, 'User proposed object deletion');
+                    showNotification('Deletion proposal submitted for community voting');
+                    updateProposalCount();
+                } catch (error) {
+                    alert('Failed to create proposal: ' + error.message);
+                }
             };
         }
     }
@@ -1519,7 +1541,7 @@ async function showUserSpacePage() {
 }
 
 async function renderUserSpacePage() {
-    const container = document.getElementById('user-space-content');
+    const container = document.getElementById('user-space-page').querySelector('.user-space-main');
     
     if (!currentUser) {
         container.innerHTML = '<div class="error">Please log in to view your user space.</div>';
@@ -1950,8 +1972,8 @@ async function adminApproveProposal(proposalId) {
         }
         
         showNotification('Proposal approved and executed by admin');
-        if (typeof renderProposals === 'function') {
-            renderProposals();
+        if (typeof document.renderProposals === 'function') {
+            document.renderProposals();
         }
     } catch (error) {
         alert('Failed to approve proposal: ' + error.message);
@@ -1972,8 +1994,8 @@ async function adminVetoProposal(proposalId) {
         }
         
         showNotification('Proposal rejected by admin');
-        if (typeof renderProposals === 'function') {
-            renderProposals();
+        if (typeof document.renderProposals === 'function') {
+            document.renderProposals();
         }
     } catch (error) {
         alert('Failed to reject proposal: ' + error.message);
@@ -2177,12 +2199,21 @@ async function renderObjectStatsPage() {
     }
 }
 
-function updateProposalCount() {
-    const count = Object.keys(data.proposals).length;
-    const proposalCountElem = document.getElementById('proposal-count');
-    if (proposalCountElem) {
-        proposalCountElem.textContent = count;
-        proposalCountElem.style.display = count > 0 ? 'inline' : 'none';
+async function updateProposalCount() {
+    try {
+        const proposals = await fetchProposals('pending');
+        const count = proposals.length;
+        const proposalCountElem = document.getElementById('proposal-count');
+        if (proposalCountElem) {
+            proposalCountElem.textContent = count;
+            proposalCountElem.style.display = count > 0 ? 'inline' : 'none';
+        }
+    } catch (error) {
+        console.error('Error updating proposal count:', error);
+        const proposalCountElem = document.getElementById('proposal-count');
+        if (proposalCountElem) {
+            proposalCountElem.style.display = 'none';
+        }
     }
 }
 
@@ -2296,13 +2327,57 @@ document.renderProposals = async function renderProposals() {
             proposalsList.innerHTML = `<div class="empty-state"><h3>No pending proposals</h3></div>`;
             return;
         }
-        proposalsList.innerHTML = proposals.map(p => `
-            <div class="proposal-item">
-                <div><strong>Type:</strong> ${escapeHtml(p.type)} | <strong>Target:</strong> ${escapeHtml(p.target_type)} #${p.target_id}</div>
-                <div><strong>Proposed by:</strong> ${escapeHtml(p.proposer_username)} | <strong>Reason:</strong> ${escapeHtml(p.reason || '')}</div>
-                <div><button onclick="voteProposalUI('${p.id}',1)">Approve</button> <button onclick="voteProposalUI('${p.id}',0)">Reject</button> <button onclick="executeProposalUI('${p.id}')">Execute</button></div>
-            </div>
-        `).join('');
+        proposalsList.innerHTML = proposals.map(p => {
+            const isAdmin = currentUser && currentUser.isAdmin;
+            const formatNewValue = () => {
+                if (!p.new_value) return 'N/A';
+                try {
+                    const parsed = JSON.parse(p.new_value);
+                    if (parsed.name && parsed.tags) {
+                        return `Name: "${parsed.name}", Tags: [${parsed.tags.join(', ')}]`;
+                    }
+                    return p.new_value;
+                } catch {
+                    return p.new_value;
+                }
+            };
+            
+            return `
+                <div class="proposal-item">
+                    <div class="proposal-header">
+                        <span class="proposal-type">${escapeHtml(p.type.toUpperCase())} ${escapeHtml(p.target_type.toUpperCase())}</span>
+                        <div class="proposal-user">Proposed by: ${escapeHtml(p.proposer_username || 'Unknown')}</div>
+                    </div>
+                    <div class="proposal-content">
+                        <div><strong>Target ID:</strong> ${p.target_id}</div>
+                        ${p.reason ? `<div><strong>Reason:</strong> ${escapeHtml(p.reason)}</div>` : ''}
+                        ${p.new_value ? `<div><strong>Proposed Changes:</strong> ${escapeHtml(formatNewValue())}</div>` : ''}
+                        <div><strong>Created:</strong> ${formatDate(p.created_at)}</div>
+                    </div>
+                    <div class="proposal-voting">
+                        <div class="voting-actions">
+                            <button class="btn btn-small vote-agree" onclick="voteProposalUI('${p.id}',1)">
+                                <i class="fas fa-thumbs-up"></i> Approve
+                            </button>
+                            <button class="btn btn-small vote-disagree" onclick="voteProposalUI('${p.id}',0)">
+                                <i class="fas fa-thumbs-down"></i> Reject
+                            </button>
+                            <button class="btn btn-small btn-secondary" onclick="executeProposalUI('${p.id}')">
+                                <i class="fas fa-gavel"></i> Execute
+                            </button>
+                            ${isAdmin ? `
+                                <button class="btn btn-small btn-primary" onclick="adminApproveProposal('${p.id}')">
+                                    <i class="fas fa-check-circle"></i> Admin Approve
+                                </button>
+                                <button class="btn btn-small btn-danger" onclick="adminVetoProposal('${p.id}')">
+                                    <i class="fas fa-times-circle"></i> Admin Reject
+                                </button>
+                            ` : ''}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
     } catch (e) {
         proposalsList.innerHTML = '<div class="error">Failed to load proposals.</div>';
     }
