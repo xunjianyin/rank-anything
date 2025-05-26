@@ -551,7 +551,7 @@ async function showObjectPage(objectId) {
     }
 }
 
-function showSearchPage(query, searchType = 'all', tagFilters = null, tagLogic = 'and') {
+async function showSearchPage(query, searchType = 'all', tagFilters = null, tagLogic = 'and') {
     currentPage = 'search';
     lastSearchQuery = query;
     
@@ -559,7 +559,14 @@ function showSearchPage(query, searchType = 'all', tagFilters = null, tagLogic =
     document.getElementById('search-page').classList.add('active');
     
     updateBreadcrumb();
-    performSearchOperation(query, searchType, tagFilters, tagLogic);
+    
+    // Show loading message
+    const searchTitle = document.getElementById('search-title');
+    const searchInfo = document.getElementById('search-info');
+    searchTitle.textContent = 'Searching...';
+    searchInfo.textContent = 'Please wait while we search for results.';
+    
+    await performSearchOperation(query, searchType, tagFilters, tagLogic);
 }
 
 function showProposalsPage() {
@@ -743,11 +750,11 @@ function handleSearchKeypress(event) {
     }
 }
 
-function performSearch() {
+async function performSearch() {
     const query = document.getElementById('search-input').value.trim();
     if (!query) return;
     
-    showSearchPage(query);
+    await showSearchPage(query);
 }
 
 function toggleAdvancedSearch() {
@@ -756,7 +763,7 @@ function toggleAdvancedSearch() {
     panel.style.display = isVisible ? 'none' : 'block';
 }
 
-function performAdvancedSearch() {
+async function performAdvancedSearch() {
     const query = document.getElementById('search-input').value.trim();
     const searchType = document.getElementById('search-type').value;
     const tagInput = document.getElementById('tag-search-input').value.trim();
@@ -772,7 +779,7 @@ function performAdvancedSearch() {
         return;
     }
     
-    showSearchPage(query, searchType, tagFilters, tagLogic);
+    await showSearchPage(query, searchType, tagFilters, tagLogic);
     toggleAdvancedSearch(); // Hide the panel after search
 }
 
@@ -789,82 +796,150 @@ function clearSearch() {
     clearAdvancedSearch();
 }
 
-function performSearchOperation(query, searchType, tagFilters, tagLogic) {
+async function performSearchOperation(query, searchType, tagFilters, tagLogic) {
     const results = {
         topics: [],
         objects: []
     };
     
-    // Search topics
-    if (searchType === 'all' || searchType === 'topics') {
-        results.topics = searchTopics(query, tagFilters, tagLogic);
-    }
-    
-    // Search objects
-    if (searchType === 'all' || searchType === 'objects') {
-        results.objects = searchObjects(query, tagFilters, tagLogic);
-    }
-    
-    currentSearchResults = results;
-    renderSearchResults(query, searchType, tagFilters, tagLogic);
-}
-
-function searchTopics(query, tagFilters, tagLogic) {
-    return data.topics.filter(topic => {
-        if (query && !topic.name.toLowerCase().includes(query.toLowerCase())) {
-            return false;
+    try {
+        // Search topics
+        if (searchType === 'all' || searchType === 'topics') {
+            results.topics = await searchTopics(query, tagFilters, tagLogic);
         }
         
-        // For topics, we don't have direct tags, but we can search objects within topics
-        if (tagFilters && tagFilters.length > 0) {
-            const topicObjects = data.objects[topic.id] || [];
-            const hasMatchingObjects = topicObjects.some(object => 
-                matchesTags(object.tags, tagFilters, tagLogic)
-            );
-            return hasMatchingObjects;
+        // Search objects
+        if (searchType === 'all' || searchType === 'objects') {
+            results.objects = await searchObjects(query, tagFilters, tagLogic);
         }
         
-        return true;
-    });
+        currentSearchResults = results;
+        renderSearchResults(query, searchType, tagFilters, tagLogic);
+    } catch (error) {
+        console.error('Search error:', error);
+        currentSearchResults = { topics: [], objects: [] };
+        renderSearchResults(query, searchType, tagFilters, tagLogic);
+    }
 }
 
-function searchObjects(query, tagFilters, tagLogic) {
-    const results = [];
-    
-    Object.keys(data.objects).forEach(topicId => {
-        const topicObjects = data.objects[topicId] || [];
-        const topic = data.topics.find(t => t.id === topicId);
+async function searchTopics(query, tagFilters, tagLogic) {
+    try {
+        const topics = await fetchTopics();
+        const results = [];
         
-        topicObjects.forEach(object => {
+        for (const topic of topics) {
             let matches = true;
             
-            // Text search
-            if (query) {
-                const searchText = query.toLowerCase();
-                const objectMatches = object.name.toLowerCase().includes(searchText) ||
-                                   object.tags.some(tag => tag.toLowerCase().includes(searchText));
+            // Text search in topic name
+            if (query && !topic.name.toLowerCase().includes(query.toLowerCase())) {
+                matches = false;
+            }
+            
+            // Tag filters - search in topic tags and objects within topics
+            if (matches && tagFilters && tagFilters.length > 0) {
+                // Check topic tags first
+                const topicTags = await fetchTopicTags(topic.id);
+                const topicTagNames = topicTags.map(tag => tag.name);
+                const topicMatches = matchesTags(topicTagNames, tagFilters, tagLogic);
                 
-                if (!objectMatches) {
-                    matches = false;
+                if (!topicMatches) {
+                    // If topic tags don't match, check objects within the topic
+                    try {
+                        const topicObjects = await fetchObjects(topic.id);
+                        const hasMatchingObjects = await Promise.all(
+                            topicObjects.map(async (object) => {
+                                const objectTags = await fetchObjectTags(object.id);
+                                const objectTagNames = objectTags.map(tag => tag.name);
+                                return matchesTags(objectTagNames, tagFilters, tagLogic);
+                            })
+                        );
+                        matches = hasMatchingObjects.some(match => match);
+                    } catch (error) {
+                        console.error(`Error fetching objects for topic ${topic.id}:`, error);
+                        matches = false;
+                    }
+                } else {
+                    matches = true;
                 }
             }
             
-            // Tag filters
-            if (matches && tagFilters && tagFilters.length > 0) {
-                matches = matchesTags(object.tags, tagFilters, tagLogic);
-            }
-            
             if (matches) {
-                results.push({
-                    ...object,
-                    topicId: topicId,
-                    topicName: topic.name
-                });
+                results.push(topic);
             }
-        });
-    });
-    
-    return results;
+        }
+        
+        return results;
+    } catch (error) {
+        console.error('Error searching topics:', error);
+        return [];
+    }
+}
+
+async function searchObjects(query, tagFilters, tagLogic) {
+    try {
+        const topics = await fetchTopics();
+        const results = [];
+        
+        for (const topic of topics) {
+            try {
+                const topicObjects = await fetchObjects(topic.id);
+                
+                for (const object of topicObjects) {
+                    let matches = true;
+                    
+                    // Text search in object name
+                    if (query) {
+                        const searchText = query.toLowerCase();
+                        let objectMatches = object.name.toLowerCase().includes(searchText);
+                        
+                        // Also search in object tags
+                        if (!objectMatches) {
+                            try {
+                                const objectTags = await fetchObjectTags(object.id);
+                                const objectTagNames = objectTags.map(tag => tag.name);
+                                objectMatches = objectTagNames.some(tag => 
+                                    tag.toLowerCase().includes(searchText)
+                                );
+                            } catch (error) {
+                                console.error(`Error fetching tags for object ${object.id}:`, error);
+                            }
+                        }
+                        
+                        if (!objectMatches) {
+                            matches = false;
+                        }
+                    }
+                    
+                    // Tag filters
+                    if (matches && tagFilters && tagFilters.length > 0) {
+                        try {
+                            const objectTags = await fetchObjectTags(object.id);
+                            const objectTagNames = objectTags.map(tag => tag.name);
+                            matches = matchesTags(objectTagNames, tagFilters, tagLogic);
+                        } catch (error) {
+                            console.error(`Error fetching tags for object ${object.id}:`, error);
+                            matches = false;
+                        }
+                    }
+                    
+                    if (matches) {
+                        results.push({
+                            ...object,
+                            topicId: topic.id,
+                            topicName: topic.name
+                        });
+                    }
+                }
+            } catch (error) {
+                console.error(`Error fetching objects for topic ${topic.id}:`, error);
+            }
+        }
+        
+        return results;
+    } catch (error) {
+        console.error('Error searching objects:', error);
+        return [];
+    }
 }
 
 function matchesTags(objectTags, tagFilters, tagLogic) {
@@ -884,7 +959,7 @@ function matchesTags(objectTags, tagFilters, tagLogic) {
     }
 }
 
-function renderSearchResults(query, searchType, tagFilters, tagLogic) {
+async function renderSearchResults(query, searchType, tagFilters, tagLogic) {
     const searchTitle = document.getElementById('search-title');
     const searchInfo = document.getElementById('search-info');
     const topicsSection = document.getElementById('topics-results-section');
@@ -920,14 +995,14 @@ function renderSearchResults(query, searchType, tagFilters, tagLogic) {
     if (currentSearchResults.topics.length > 0) {
         hasResults = true;
         topicsSection.style.display = 'block';
-        renderSearchTopics();
+        await renderSearchTopics();
     }
     
     // Render objects results
     if (currentSearchResults.objects.length > 0) {
         hasResults = true;
         objectsSection.style.display = 'block';
-        renderSearchObjects();
+        await renderSearchObjects();
     }
     
     // Show no results message if needed
@@ -936,52 +1011,100 @@ function renderSearchResults(query, searchType, tagFilters, tagLogic) {
     }
 }
 
-function renderSearchTopics() {
+async function renderSearchTopics() {
     const grid = document.getElementById('search-topics-grid');
     
-    grid.innerHTML = currentSearchResults.topics.map(topic => {
-        const objectCount = data.objects[topic.id] ? data.objects[topic.id].length : 0;
-        return `
-            <div class="topic-card" onclick="showTopicPage('${topic.id}')">
-                <div class="card-owner">by ${escapeHtml(topic.createdBy)}</div>
-                <h3>${escapeHtml(topic.name)}</h3>
-                <p class="rating-text">${objectCount} item${objectCount !== 1 ? 's' : ''}</p>
-            </div>
-        `;
-    }).join('');
+    try {
+        const topicsWithCounts = await Promise.all(
+            currentSearchResults.topics.map(async (topic) => {
+                try {
+                    const objects = await fetchObjects(topic.id);
+                    return { ...topic, objectCount: objects.length };
+                } catch (error) {
+                    console.error(`Error fetching objects for topic ${topic.id}:`, error);
+                    return { ...topic, objectCount: 0 };
+                }
+            })
+        );
+        
+        grid.innerHTML = topicsWithCounts.map(topic => {
+            return `
+                <div class="topic-card" onclick="showTopicPage('${topic.id}')">
+                    <div class="card-owner">by ${escapeHtml(topic.creator_username || '')}</div>
+                    <h3>${escapeHtml(topic.name)}</h3>
+                    <p class="rating-text">${topic.objectCount} item${topic.objectCount !== 1 ? 's' : ''}</p>
+                </div>
+            `;
+        }).join('');
+    } catch (error) {
+        console.error('Error rendering search topics:', error);
+        grid.innerHTML = '<div class="error">Failed to load topic results</div>';
+    }
 }
 
-function renderSearchObjects() {
+async function renderSearchObjects() {
     const grid = document.getElementById('search-objects-grid');
     
-    grid.innerHTML = currentSearchResults.objects.map(object => {
-        const ratings = data.ratings[object.topicId][object.id] || [];
-        const averageRating = calculateAverageRating(ratings);
-        const ratingCount = ratings.length;
+    try {
+        const objectsWithDetails = await Promise.all(
+            currentSearchResults.objects.map(async (object) => {
+                try {
+                    // Fetch ratings and tags for each object
+                    const [ratings, tags] = await Promise.all([
+                        fetchRatings(object.id),
+                        fetchObjectTags(object.id)
+                    ]);
+                    
+                    const averageRating = calculateAverageRating(ratings);
+                    const ratingCount = ratings.length;
+                    const tagNames = tags.map(tag => tag.name);
+                    
+                    return {
+                        ...object,
+                        averageRating,
+                        ratingCount,
+                        tags: tagNames
+                    };
+                } catch (error) {
+                    console.error(`Error fetching details for object ${object.id}:`, error);
+                    return {
+                        ...object,
+                        averageRating: 0,
+                        ratingCount: 0,
+                        tags: []
+                    };
+                }
+            })
+        );
         
-        return `
-            <div class="object-card" onclick="showObjectFromSearch('${object.topicId}', '${object.id}')">
-                <div class="card-owner">by ${escapeHtml(object.createdBy)}</div>
-                <div class="topic-context">From: ${escapeHtml(object.topicName)}</div>
-                <h3>${escapeHtml(object.name)}</h3>
-                ${averageRating > 0 ? `
-                    <div class="rating">
-                        <span class="stars">${renderStars(averageRating)}</span>
-                        <span class="rating-text">${averageRating.toFixed(1)} (${ratingCount} review${ratingCount !== 1 ? 's' : ''})</span>
-                    </div>
-                ` : `
-                    <div class="rating">
-                        <span class="rating-text">No ratings yet</span>
-                    </div>
-                `}
-                ${object.tags.length > 0 ? `
-                    <div class="tags">
-                        ${object.tags.map(tag => `<span class="tag clickable" onclick="searchByTag('${escapeHtml(tag)}', event)">${escapeHtml(tag)}</span>`).join('')}
-                    </div>
-                ` : ''}
-            </div>
-        `;
-    }).join('');
+        grid.innerHTML = objectsWithDetails.map(object => {
+            return `
+                <div class="object-card" onclick="showObjectFromSearch('${object.topicId}', '${object.id}')">
+                    <div class="card-owner">by ${escapeHtml(object.creator_username || '')}</div>
+                    <div class="topic-context">From: ${escapeHtml(object.topicName)}</div>
+                    <h3>${escapeHtml(object.name)}</h3>
+                    ${object.averageRating > 0 ? `
+                        <div class="rating">
+                            <span class="stars">${renderStars(object.averageRating)}</span>
+                            <span class="rating-text">${object.averageRating.toFixed(1)} (${object.ratingCount} review${object.ratingCount !== 1 ? 's' : ''})</span>
+                        </div>
+                    ` : `
+                        <div class="rating">
+                            <span class="rating-text">No ratings yet</span>
+                        </div>
+                    `}
+                    ${object.tags.length > 0 ? `
+                        <div class="tags">
+                            ${object.tags.map(tag => `<span class="tag clickable" onclick="searchByTag('${escapeHtml(tag)}', event)">${escapeHtml(tag)}</span>`).join('')}
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+        }).join('');
+    } catch (error) {
+        console.error('Error rendering search objects:', error);
+        grid.innerHTML = '<div class="error">Failed to load object results</div>';
+    }
 }
 
 async function showObjectFromSearch(topicId, objectId) {
@@ -989,7 +1112,7 @@ async function showObjectFromSearch(topicId, objectId) {
     await showObjectPage(objectId);
 }
 
-function searchByTag(tag, event) {
+async function searchByTag(tag, event) {
     if (event) {
         event.stopPropagation(); // Prevent card click
     }
@@ -1004,7 +1127,7 @@ function searchByTag(tag, event) {
     document.getElementById('advanced-search-panel').style.display = 'block';
     
     // Perform search
-    showSearchPage('', 'all', [tag], 'or');
+    await showSearchPage('', 'all', [tag], 'or');
 }
 
 // --- Topic Management with Backend API ---
