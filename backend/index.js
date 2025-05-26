@@ -79,7 +79,7 @@ const availableConfigs = EMAIL_CONFIGS.filter(config => {
 console.log(`Available email configurations: ${availableConfigs.map(c => c.name).join(', ')}`);
 
 // Create primary transporter
-let transporter = nodemailer.createTransporter(availableConfigs[0]);
+let transporter = nodemailer.createTransport(availableConfigs[0]);
 
 
 
@@ -143,7 +143,7 @@ async function sendVerificationEmail(email, code, username) {
       // Update sender email for this configuration
       mailOptions.from = getSenderEmail(config);
       
-      const currentTransporter = nodemailer.createTransporter(config);
+      const currentTransporter = nodemailer.createTransport(config);
       await currentTransporter.sendMail(mailOptions);
       
       console.log(`Email sent successfully using ${config.name}`);
