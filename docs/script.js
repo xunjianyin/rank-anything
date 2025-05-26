@@ -798,7 +798,7 @@ function updateTopicActions(topic) {
                 const newTagsStr = prompt('Enter tags (comma-separated):', currentTagNames.join(', '));
                 if (newTagsStr === null) return;
                 
-                const newTags = newTagsStr ? newTagsStr.split(',').map(tag => tag.trim()).filter(tag => tag) : [];
+                const newTags = parseAndCleanTags(newTagsStr);
                 
                 if (newName.trim() === topic.name && JSON.stringify(newTags) === JSON.stringify(currentTagNames)) return;
                 
@@ -860,7 +860,7 @@ function updateObjectActions(object) {
                 const currentTagNames = currentTags.map(tag => tag.name);
                 const newTagsStr = prompt('Enter tags (comma-separated):', currentTagNames.join(', '));
                 if (newTagsStr === null) return;
-                const newTags = newTagsStr ? newTagsStr.split(',').map(tag => tag.trim()).filter(tag => tag) : [];
+                const newTags = parseAndCleanTags(newTagsStr);
                 if (newName.trim() === object.name && JSON.stringify(newTags) === JSON.stringify(currentTagNames)) return;
                 try {
                     await createProposal('edit', 'object', object.id, JSON.stringify({ name: newName.trim(), tags: newTags }), 'User proposed object edit');
@@ -917,7 +917,7 @@ async function performAdvancedSearch() {
     
     let tagFilters = null;
     if (tagInput) {
-        tagFilters = tagInput.split(',').map(tag => tag.trim()).filter(tag => tag);
+        tagFilters = parseAndCleanTags(tagInput);
     }
     
     if (!query && !tagFilters) {
@@ -1370,7 +1370,7 @@ async function addTopic(event) {
     const topicTagsStr = document.getElementById('topic-tags').value.trim();
     if (!topicName) return;
     
-    const tags = topicTagsStr ? topicTagsStr.split(',').map(tag => tag.trim()).filter(tag => tag) : [];
+    const tags = parseAndCleanTags(topicTagsStr);
     
     try {
         await createTopic(topicName, tags);
@@ -1528,7 +1528,7 @@ async function addObject(event) {
         
         // Add additional tags if specified (beyond inherited topic tags)
         if (objectTagsStr) {
-            const additionalTags = objectTagsStr.split(',').map(tag => tag.trim()).filter(tag => tag);
+            const additionalTags = parseAndCleanTags(objectTagsStr);
             if (additionalTags.length > 0) {
                 // Get current tags (inherited from topic)
                 const currentTags = await fetchObjectTags(newObject.id);
@@ -1790,6 +1790,34 @@ function renderStars(rating) {
     }
     
     return html;
+}
+
+// Helper function to parse and clean tags from user input
+function parseAndCleanTags(tagsInput) {
+    if (!tagsInput || typeof tagsInput !== 'string') {
+        return [];
+    }
+    
+    // Split by various delimiters: comma, Chinese comma, semicolon, Chinese semicolon, Chinese enumeration mark
+    const delimiters = /[,，;；、]/;
+    const rawTags = tagsInput.split(delimiters);
+    
+    const cleanedTags = rawTags
+        .map(tag => {
+            // Trim whitespace
+            tag = tag.trim();
+            
+            // Remove symbols at the beginning and end that are not letters, Chinese characters, or numbers
+            // Keep only: a-z, A-Z, 0-9, Chinese characters (Unicode ranges), and spaces in the middle
+            tag = tag.replace(/^[^\w\u4e00-\u9fff\u3400-\u4dbf\u20000-\u2a6df\u2a700-\u2b73f\u2b740-\u2b81f\u2b820-\u2ceaf\uf900-\ufaff\u3300-\u33ff\ufe30-\ufe4f\uf900-\ufaff\u2f800-\u2fa1f]+/, '');
+            tag = tag.replace(/[^\w\u4e00-\u9fff\u3400-\u4dbf\u20000-\u2a6df\u2a700-\u2b73f\u2b740-\u2b81f\u2b820-\u2ceaf\uf900-\ufaff\u3300-\u33ff\ufe30-\ufe4f\uf900-\ufaff\u2f800-\u2fa1f\s]+$/, '');
+            
+            return tag;
+        })
+        .filter(tag => tag.length > 0) // Remove empty tags
+        .filter((tag, index, array) => array.indexOf(tag) === index); // Remove duplicates
+    
+    return cleanedTags;
 }
 
 function escapeHtml(text) {
@@ -3897,7 +3925,7 @@ async function editObject() {
         const newTagsStr = prompt('Enter tags (comma-separated):', currentTagNames.join(', '));
         if (newTagsStr === null) return;
         
-        const newTags = newTagsStr ? newTagsStr.split(',').map(tag => tag.trim()).filter(tag => tag) : [];
+        const newTags = parseAndCleanTags(newTagsStr);
         
         if (newName.trim() === object.name && JSON.stringify(newTags.sort()) === JSON.stringify(currentTagNames.sort())) {
             return; // No changes
@@ -3949,7 +3977,7 @@ async function editTopic() {
         const newTagsStr = prompt('Enter tags (comma-separated):', currentTagNames.join(', '));
         if (newTagsStr === null) return;
         
-        const newTags = newTagsStr ? newTagsStr.split(',').map(tag => tag.trim()).filter(tag => tag) : [];
+        const newTags = parseAndCleanTags(newTagsStr);
         
         await updateTopic(currentTopicId, newName.trim(), newTags);
         

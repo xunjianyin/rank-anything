@@ -15,43 +15,71 @@ const JWT_EXPIRES_IN = '7d';
 // Initialize content filter
 const contentFilter = new ContentFilter();
 
-// Email configuration
-const EMAIL_CONFIG = {
-  host: 'smtp.163.com',
-  port: 465,
-  secure: true,
-  auth: {
-    user: 'rank_anything@163.com',
-    pass: process.env.EMAIL_PASSWORD || 'QHDfYMBxDTyLdJVB'
+// Email configuration with multiple fallbacks
+const EMAIL_CONFIGS = [
+  // Primary: 163.com with SSL (port 465)
+  {
+    name: '163.com SSL',
+    host: 'smtp.163.com',
+    port: 465,
+    secure: true,
+    auth: {
+      user: 'rank_anything@163.com',
+      pass: process.env.EMAIL_PASSWORD || 'QHDfYMBxDTyLdJVB'
+    },
+    tls: {
+      rejectUnauthorized: false
+    },
+    connectionTimeout: 30000,
+    greetingTimeout: 15000,
+    socketTimeout: 30000
   },
-  tls: {
-    rejectUnauthorized: false
+  // Fallback 1: 163.com with STARTTLS (port 587)
+  {
+    name: '163.com STARTTLS',
+    host: 'smtp.163.com',
+    port: 587,
+    secure: false,
+    auth: {
+      user: 'rank_anything@163.com',
+      pass: process.env.EMAIL_PASSWORD || 'QHDfYMBxDTyLdJVB'
+    },
+    tls: {
+      rejectUnauthorized: false
+    },
+    connectionTimeout: 30000,
+    greetingTimeout: 15000,
+    socketTimeout: 30000
   },
-  connectionTimeout: 60000,
-  greetingTimeout: 30000,
-  socketTimeout: 60000
-};
+  // Fallback 2: Gmail (if Gmail credentials are provided)
+  {
+    name: 'Gmail',
+    service: 'gmail',
+    auth: {
+      user: process.env.GMAIL_USER,
+      pass: process.env.GMAIL_APP_PASSWORD
+    },
+    tls: {
+      rejectUnauthorized: false
+    },
+    connectionTimeout: 30000,
+    greetingTimeout: 15000,
+    socketTimeout: 30000
+  }
+];
 
-// Create email transporter
-// Create email transporter with fallback configuration
-let transporter = nodemailer.createTransport(EMAIL_CONFIG);
+// Filter out Gmail config if credentials are not provided
+const availableConfigs = EMAIL_CONFIGS.filter(config => {
+  if (config.name === 'Gmail') {
+    return process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD;
+  }
+  return true;
+});
 
-// Fallback configuration for port 587
-const EMAIL_CONFIG_FALLBACK = {
-  host: 'smtp.163.com',
-  port: 587,
-  secure: false,
-  auth: {
-    user: 'rank_anything@163.com',
-    pass: process.env.EMAIL_PASSWORD || 'QHDfYMBxDTyLdJVB'
-  },
-  tls: {
-    rejectUnauthorized: false
-  },
-  connectionTimeout: 60000,
-  greetingTimeout: 30000,
-  socketTimeout: 60000
-};
+console.log(`Available email configurations: ${availableConfigs.map(c => c.name).join(', ')}`);
+
+// Create primary transporter
+let transporter = nodemailer.createTransporter(availableConfigs[0]);
 
 
 
@@ -76,10 +104,18 @@ function generateVerificationCode() {
   return Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit code
 }
 
-// Send verification email
+// Send verification email with multiple fallback configurations
 async function sendVerificationEmail(email, code, username) {
+  // Determine the sender email based on the configuration
+  const getSenderEmail = (config) => {
+    if (config.name === 'Gmail') {
+      return process.env.GMAIL_USER || 'rank.anything.app@gmail.com';
+    }
+    return 'rank_anything@163.com';
+  };
+
   const mailOptions = {
-    from: 'rank_anything@163.com',
+    from: getSenderEmail(availableConfigs[0]),
     to: email,
     subject: 'Rank-Anything Email Verification',
     html: `
@@ -98,27 +134,41 @@ async function sendVerificationEmail(email, code, username) {
     `
   };
 
-  try {
-    await transporter.sendMail(mailOptions);
-    return { success: true };
-  } catch (error) {
-    console.error('Email sending error (primary config):', error);
-    
-    // Try fallback configuration (port 587)
+  // Try each configuration in order
+  for (let i = 0; i < availableConfigs.length; i++) {
+    const config = availableConfigs[i];
     try {
-      console.log('Trying fallback email configuration (port 587)...');
-      const fallbackTransporter = nodemailer.createTransport(EMAIL_CONFIG_FALLBACK);
-      await fallbackTransporter.sendMail(mailOptions);
-      console.log('Email sent successfully with fallback configuration');
-      return { success: true };
-          } catch (fallbackError) {
-        console.error('Email sending error (fallback config):', fallbackError);
+      console.log(`Attempting to send email using ${config.name}...`);
+      
+      // Update sender email for this configuration
+      mailOptions.from = getSenderEmail(config);
+      
+      const currentTransporter = nodemailer.createTransporter(config);
+      await currentTransporter.sendMail(mailOptions);
+      
+      console.log(`Email sent successfully using ${config.name}`);
+      return { success: true, usedConfig: config.name };
+    } catch (error) {
+      console.error(`Email sending error with ${config.name}:`, error.message);
+      
+      // If this is the last configuration, return the error
+      if (i === availableConfigs.length - 1) {
         return { 
           success: false, 
-          error: `Both email configurations failed. Primary: ${error.message}, Fallback: ${fallbackError.message}` 
+          error: `All email configurations failed. Last error: ${error.message}`,
+          details: error
         };
       }
+      
+      // Otherwise, continue to the next configuration
+      console.log(`Trying next email configuration...`);
+    }
   }
+  
+  return { 
+    success: false, 
+    error: 'No email configurations available' 
+  };
 }
 
 app.use(cors());
@@ -134,6 +184,57 @@ app.get('/', (req, res) => {
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok' });
+});
+
+// Email configuration status endpoint
+app.get('/api/email-config', (req, res) => {
+  res.json({
+    availableConfigs: availableConfigs.map(config => ({
+      name: config.name,
+      host: config.host || config.service,
+      port: config.port || 'default',
+      secure: config.secure
+    })),
+    hasEmailPassword: !!process.env.EMAIL_PASSWORD,
+    hasGmailCredentials: !!(process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD)
+  });
+});
+
+// Email testing endpoint (for debugging)
+app.post('/api/test-email', async (req, res) => {
+  const { email, testCode } = req.body;
+  
+  if (!email) {
+    return res.status(400).json({ error: 'Email is required for testing' });
+  }
+  
+  const code = testCode || '123456';
+  const username = 'Test User';
+  
+  try {
+    const result = await sendVerificationEmail(email, code, username);
+    
+    if (result.success) {
+      res.json({ 
+        success: true, 
+        message: `Test email sent successfully using ${result.usedConfig}`,
+        usedConfig: result.usedConfig
+      });
+    } else {
+      res.status(500).json({ 
+        success: false, 
+        error: result.error,
+        details: result.details?.message || 'Unknown error'
+      });
+    }
+  } catch (error) {
+    console.error('Email test error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Email test failed',
+      details: error.message
+    });
+  }
 });
 
 // User registration
@@ -420,6 +521,34 @@ function checkContentSafety(text) {
   return contentFilter.checkContent(text);
 }
 
+// Helper function to parse and clean tags from user input
+function parseAndCleanTags(tagsInput) {
+  if (!tagsInput || typeof tagsInput !== 'string') {
+    return [];
+  }
+  
+  // Split by various delimiters: comma, Chinese comma, semicolon, Chinese semicolon, Chinese enumeration mark
+  const delimiters = /[,，;；、]/;
+  const rawTags = tagsInput.split(delimiters);
+  
+  const cleanedTags = rawTags
+    .map(tag => {
+      // Trim whitespace
+      tag = tag.trim();
+      
+      // Remove symbols at the beginning and end that are not letters, Chinese characters, or numbers
+      // Keep only: a-z, A-Z, 0-9, Chinese characters (Unicode ranges), and spaces in the middle
+      tag = tag.replace(/^[^\w\u4e00-\u9fff\u3400-\u4dbf\u20000-\u2a6df\u2a700-\u2b73f\u2b740-\u2b81f\u2b820-\u2ceaf\uf900-\ufaff\u3300-\u33ff\ufe30-\ufe4f\uf900-\ufaff\u2f800-\u2fa1f\s]+/, '');
+      tag = tag.replace(/[^\w\u4e00-\u9fff\u3400-\u4dbf\u20000-\u2a6df\u2a700-\u2b73f\u2b740-\u2b81f\u2b820-\u2ceaf\uf900-\ufaff\u3300-\u33ff\ufe30-\ufe4f\uf900-\ufaff\u2f800-\u2fa1f\s]+$/, '');
+      
+      return tag;
+    })
+    .filter(tag => tag.length > 0) // Remove empty tags
+    .filter((tag, index, array) => array.indexOf(tag) === index); // Remove duplicates
+  
+  return cleanedTags;
+}
+
 // --- Topic Endpoints ---
 // List all topics
 app.get('/api/topics', (req, res) => {
@@ -432,6 +561,16 @@ app.get('/api/topics', (req, res) => {
 app.post('/api/topics', authenticateToken, validateContent, (req, res) => {
   const { name, tags } = req.body;
   if (!name) return res.status(400).json({ error: 'Name is required.' });
+  
+  // Parse and clean tags
+  let cleanedTags = [];
+  if (tags) {
+    if (typeof tags === 'string') {
+      cleanedTags = parseAndCleanTags(tags);
+    } else if (Array.isArray(tags)) {
+      cleanedTags = tags.flatMap(tag => parseAndCleanTags(tag));
+    }
+  }
   
   // Check if user is restricted from editing
   db.get(`
@@ -451,8 +590,8 @@ app.post('/api/topics', authenticateToken, validateContent, (req, res) => {
     const topicId = this.lastID;
     
     // Add tags if provided
-    if (tags && Array.isArray(tags) && tags.length > 0) {
-      const insertTags = tags.map(tagName => {
+    if (cleanedTags.length > 0) {
+      const insertTags = cleanedTags.map(tagName => {
         return new Promise((resolve, reject) => {
           db.run('INSERT OR IGNORE INTO tags (name) VALUES (?)', [tagName], function(err) {
             if (err) return reject(err);
@@ -489,6 +628,16 @@ app.put('/api/topics/:id', authenticateToken, validateContent, (req, res) => {
   const { name, tags } = req.body;
   const topicId = req.params.id;
   
+  // Parse and clean tags
+  let cleanedTags = [];
+  if (tags) {
+    if (typeof tags === 'string') {
+      cleanedTags = parseAndCleanTags(tags);
+    } else if (Array.isArray(tags)) {
+      cleanedTags = tags.flatMap(tag => parseAndCleanTags(tag));
+    }
+  }
+  
   // Check if user is restricted from editing (unless admin)
   if (!req.user.isAdmin) {
     db.get(`
@@ -518,14 +667,14 @@ app.put('/api/topics/:id', authenticateToken, validateContent, (req, res) => {
       if (err) return res.status(500).json({ error: 'Database error.' });
       
       // Update tags if provided
-      if (tags && Array.isArray(tags)) {
+      if (tags !== undefined) {
         // Remove old tags
         db.run('DELETE FROM topic_tags WHERE topic_id = ?', [topicId], (err) => {
           if (err) return res.status(500).json({ error: 'Database error.' });
           
           // Insert new tags (create if not exist)
-          if (tags.length > 0) {
-            const insertTags = tags.map(tagName => {
+          if (cleanedTags.length > 0) {
+            const insertTags = cleanedTags.map(tagName => {
               return new Promise((resolve, reject) => {
                 db.run('INSERT OR IGNORE INTO tags (name) VALUES (?)', [tagName], function(err) {
                   if (err) return reject(err);
@@ -692,9 +841,18 @@ app.get('/api/tags', (req, res) => {
 app.post('/api/tags', authenticateToken, validateContent, (req, res) => {
   const { name } = req.body;
   if (!name) return res.status(400).json({ error: 'Name is required.' });
-  db.run('INSERT OR IGNORE INTO tags (name) VALUES (?)', [name], function(err) {
+  
+  // Parse and clean the tag name
+  const cleanedTags = parseAndCleanTags(name);
+  if (cleanedTags.length === 0) {
+    return res.status(400).json({ error: 'Invalid tag name after cleaning.' });
+  }
+  
+  const cleanedName = cleanedTags[0]; // Use the first cleaned tag
+  
+  db.run('INSERT OR IGNORE INTO tags (name) VALUES (?)', [cleanedName], function(err) {
     if (err) return res.status(500).json({ error: 'Database error.' });
-    db.get('SELECT * FROM tags WHERE name = ?', [name], (err, tag) => {
+    db.get('SELECT * FROM tags WHERE name = ?', [cleanedName], (err, tag) => {
       if (err) return res.status(500).json({ error: 'Database error.' });
       res.json(tag);
     });
@@ -703,8 +861,20 @@ app.post('/api/tags', authenticateToken, validateContent, (req, res) => {
 // Assign tags to an object (replace all tags)
 app.post('/api/objects/:objectId/tags', authenticateToken, validateContent, (req, res) => {
   const objectId = req.params.objectId;
-  const { tags } = req.body; // array of tag names
-  if (!Array.isArray(tags)) return res.status(400).json({ error: 'Tags must be an array.' });
+  const { tags } = req.body; // array of tag names or string
+  
+  // Parse and clean tags
+  let cleanedTags = [];
+  if (tags) {
+    if (typeof tags === 'string') {
+      cleanedTags = parseAndCleanTags(tags);
+    } else if (Array.isArray(tags)) {
+      cleanedTags = tags.flatMap(tag => parseAndCleanTags(tag));
+    } else {
+      return res.status(400).json({ error: 'Tags must be a string or array.' });
+    }
+  }
+  
   // Only creator or admin can edit tags
   db.get('SELECT * FROM objects WHERE id = ?', [objectId], (err, object) => {
     if (err || !object) return res.status(404).json({ error: 'Object not found.' });
@@ -713,23 +883,27 @@ app.post('/api/objects/:objectId/tags', authenticateToken, validateContent, (req
     db.run('DELETE FROM object_tags WHERE object_id = ?', [objectId], (err) => {
       if (err) return res.status(500).json({ error: 'Database error.' });
       // Insert new tags (create if not exist)
-      const insertTags = tags.map(tagName => {
-        return new Promise((resolve, reject) => {
-          db.run('INSERT OR IGNORE INTO tags (name) VALUES (?)', [tagName], function(err) {
-            if (err) return reject(err);
-            db.get('SELECT id FROM tags WHERE name = ?', [tagName], (err, tag) => {
+      if (cleanedTags.length > 0) {
+        const insertTags = cleanedTags.map(tagName => {
+          return new Promise((resolve, reject) => {
+            db.run('INSERT OR IGNORE INTO tags (name) VALUES (?)', [tagName], function(err) {
               if (err) return reject(err);
-              db.run('INSERT OR IGNORE INTO object_tags (object_id, tag_id) VALUES (?, ?)', [objectId, tag.id], function(err) {
+              db.get('SELECT id FROM tags WHERE name = ?', [tagName], (err, tag) => {
                 if (err) return reject(err);
-                resolve();
+                db.run('INSERT OR IGNORE INTO object_tags (object_id, tag_id) VALUES (?, ?)', [objectId, tag.id], function(err) {
+                  if (err) return reject(err);
+                  resolve();
+                });
               });
             });
           });
         });
-      });
-      Promise.all(insertTags)
-        .then(() => res.json({ success: true }))
-        .catch(() => res.status(500).json({ error: 'Database error.' }));
+        Promise.all(insertTags)
+          .then(() => res.json({ success: true }))
+          .catch(() => res.status(500).json({ error: 'Database error.' }));
+      } else {
+        res.json({ success: true });
+      }
     });
   });
 });
@@ -757,8 +931,19 @@ app.get('/api/tags/:tagName/objects', (req, res) => {
 // Assign tags to a topic (replace all tags)
 app.post('/api/topics/:topicId/tags', authenticateToken, validateContent, (req, res) => {
   const topicId = req.params.topicId;
-  const { tags } = req.body; // array of tag names
-  if (!Array.isArray(tags)) return res.status(400).json({ error: 'Tags must be an array.' });
+  const { tags } = req.body; // array of tag names or string
+  
+  // Parse and clean tags
+  let cleanedTags = [];
+  if (tags) {
+    if (typeof tags === 'string') {
+      cleanedTags = parseAndCleanTags(tags);
+    } else if (Array.isArray(tags)) {
+      cleanedTags = tags.flatMap(tag => parseAndCleanTags(tag));
+    } else {
+      return res.status(400).json({ error: 'Tags must be a string or array.' });
+    }
+  }
   
   // Only creator or admin can edit tags
   db.get('SELECT * FROM topics WHERE id = ?', [topicId], (err, topic) => {
@@ -770,24 +955,28 @@ app.post('/api/topics/:topicId/tags', authenticateToken, validateContent, (req, 
       if (err) return res.status(500).json({ error: 'Database error.' });
       
       // Insert new tags (create if not exist)
-      const insertTags = tags.map(tagName => {
-        return new Promise((resolve, reject) => {
-          db.run('INSERT OR IGNORE INTO tags (name) VALUES (?)', [tagName], function(err) {
-            if (err) return reject(err);
-            db.get('SELECT id FROM tags WHERE name = ?', [tagName], (err, tag) => {
+      if (cleanedTags.length > 0) {
+        const insertTags = cleanedTags.map(tagName => {
+          return new Promise((resolve, reject) => {
+            db.run('INSERT OR IGNORE INTO tags (name) VALUES (?)', [tagName], function(err) {
               if (err) return reject(err);
-              db.run('INSERT OR IGNORE INTO topic_tags (topic_id, tag_id) VALUES (?, ?)', [topicId, tag.id], function(err) {
+              db.get('SELECT id FROM tags WHERE name = ?', [tagName], (err, tag) => {
                 if (err) return reject(err);
-                resolve();
+                db.run('INSERT OR IGNORE INTO topic_tags (topic_id, tag_id) VALUES (?, ?)', [topicId, tag.id], function(err) {
+                  if (err) return reject(err);
+                  resolve();
+                });
               });
             });
           });
         });
-      });
-      
-      Promise.all(insertTags)
-        .then(() => res.json({ success: true }))
-        .catch(() => res.status(500).json({ error: 'Database error.' }));
+        
+        Promise.all(insertTags)
+          .then(() => res.json({ success: true }))
+          .catch(() => res.status(500).json({ error: 'Database error.' }));
+      } else {
+        res.json({ success: true });
+      }
     });
   });
 });
@@ -1507,21 +1696,27 @@ app.post('/api/admin/content-filter/:category/words', authenticateToken, validat
     return res.status(400).json({ error: 'Words array is required.' });
   }
   
-  // Validate that words don't contain sensitive content themselves
+  // Parse and clean words using the same function as tags
+  const cleanedWords = [];
   for (const word of words) {
-    if (typeof word !== 'string' || word.trim().length === 0) {
-      return res.status(400).json({ error: 'All words must be non-empty strings.' });
+    if (typeof word === 'string') {
+      const cleaned = parseAndCleanTags(word);
+      cleanedWords.push(...cleaned);
     }
   }
   
+  if (cleanedWords.length === 0) {
+    return res.status(400).json({ error: 'No valid words after cleaning.' });
+  }
+  
   try {
-    contentFilter.addSensitiveWords(category, words.map(w => w.trim().toLowerCase()));
+    contentFilter.addSensitiveWords(category, cleanedWords.map(w => w.toLowerCase()));
     const updatedWords = contentFilter.getSensitiveWords(category);
     
     res.json({ 
       success: true, 
       category, 
-      added: words.length,
+      added: cleanedWords.length,
       total: updatedWords.length 
     });
   } catch (error) {
@@ -1577,6 +1772,37 @@ app.post('/api/admin/content-filter/test', authenticateToken, (req, res) => {
   });
 });
 
+// Startup logging
+console.log('=== Rank-Anything Backend Starting ===');
+console.log(`Node.js version: ${process.version}`);
+console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+console.log(`Port: ${PORT}`);
+
+// Email configuration status
+console.log('\n=== Email Configuration Status ===');
+console.log(`Available email configs: ${availableConfigs.length}`);
+availableConfigs.forEach((config, index) => {
+  console.log(`${index + 1}. ${config.name} - ${config.host || config.service}:${config.port || 'default'}`);
+});
+
+if (process.env.EMAIL_PASSWORD) {
+  console.log('163.com email password: ✓ Set');
+} else {
+  console.log('163.com email password: ✗ Using default (may not work)');
+}
+
+if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD) {
+  console.log('Gmail credentials: ✓ Set');
+} else {
+  console.log('Gmail credentials: ✗ Not set (Gmail fallback disabled)');
+}
+
+console.log('\n=== Database Initialization ===');
+
 app.listen(PORT, () => {
+  console.log(`\n=== Server Started Successfully ===`);
   console.log(`Backend server running on port ${PORT}`);
+  console.log(`Health check: http://localhost:${PORT}/api/health`);
+  console.log(`Email test: POST http://localhost:${PORT}/api/test-email`);
+  console.log('=====================================\n');
 }); 

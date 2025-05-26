@@ -177,7 +177,7 @@
                         <div class="tag-search-section">
                             <label>Tag Search:</label>
                             <div class="tag-search-controls">
-                                <input type="text" id="tag-search-input" placeholder="Enter tags (comma-separated)">
+                                <input type="text" id="tag-search-input" placeholder="Enter tags (use , ; ， ； 、 to separate)">
                                 <select id="tag-search-logic">
                                     <option value="and">Has ALL tags</option>
                                     <option value="or">Has ANY tag</option>
@@ -209,7 +209,7 @@
                     <div class="add-topic-form" id="add-topic-form" style="display: none;">
                         <form onsubmit="addTopic(event)">
                             <input type="text" id="topic-name" placeholder="Enter topic name" required>
-                            <input type="text" id="topic-tags" placeholder="Enter tags (comma-separated)">
+                            <input type="text" id="topic-tags" placeholder="Enter tags (use , ; ， ； 、 to separate)">
                             <div class="form-actions">
                                 <button type="submit" class="btn btn-primary">Add Topic</button>
                                 <button type="button" class="btn btn-secondary" onclick="hideAddTopicForm()">Cancel</button>
@@ -252,7 +252,7 @@
                     <div class="add-object-form" id="add-object-form" style="display: none;">
                         <form onsubmit="addObject(event)">
                             <input type="text" id="object-name" placeholder="Enter object name" required>
-                            <input type="text" id="object-tags" placeholder="Enter tags (comma-separated)">
+                            <input type="text" id="object-tags" placeholder="Enter tags (use , ; ， ； 、 to separate)">
                             <div class="form-actions">
                                 <button type="submit" class="btn btn-primary">Add Object</button>
                                 <button type="button" class="btn btn-secondary" onclick="hideAddObjectForm()">Cancel</button>
