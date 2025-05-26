@@ -663,14 +663,14 @@ app.get('/api/users/:id/stats', authenticateToken, (req, res) => {
         `, [userId, thirtyDaysAgo], (err, ratingActivity) => {
           if (err) return res.status(500).json({ error: 'Database error.' });
           
-          // Proposals created
-          db.all(`
-            SELECT 'proposal_created' as type, type as proposal_type, target_type, 
-                   created_at as timestamp, status, reason
-            FROM moderation_proposals
-            WHERE proposer_id = ? AND created_at >= ?
-            ORDER BY created_at DESC
-          `, [userId, thirtyDaysAgo], (err, proposalActivity) => {
+                  // Proposals created
+        db.all(`
+          SELECT 'proposal_created' as type, type as proposal_type, target_type, 
+                 created_at as timestamp, status, reason, target_id, new_value
+          FROM moderation_proposals
+          WHERE proposer_id = ? AND created_at >= ?
+          ORDER BY created_at DESC
+        `, [userId, thirtyDaysAgo], (err, proposalActivity) => {
             if (err) return res.status(500).json({ error: 'Database error.' });
             
             // Votes cast

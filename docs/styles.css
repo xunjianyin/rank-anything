@@ -482,22 +482,30 @@ body {
     grid-template-columns: 1fr auto 1fr;
     gap: 1rem;
     align-items: center;
-    margin-bottom: 1.5rem;
+    margin: 1rem 0;
+    padding: 1rem;
+    background: #f8fafc;
+    border-radius: 8px;
+    border: 1px solid #e2e8f0;
 }
 
 .original-content,
 .proposed-content {
     padding: 1rem;
     border-radius: 8px;
-    background: #f7fafc;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
 .original-content {
     border-left: 4px solid #e53e3e;
+    background: #fef5e7;
 }
 
 .proposed-content {
     border-left: 4px solid #38a169;
+    background: #f0fff4;
 }
 
 .change-arrow {
@@ -506,6 +514,16 @@ body {
     align-items: center;
     color: #718096;
     font-size: 1.5rem;
+}
+
+.error-notice {
+    margin-top: 1rem;
+    padding: 0.75rem;
+    background: #fed7d7;
+    border: 1px solid #feb2b2;
+    border-radius: 6px;
+    color: #c53030;
+    font-style: italic;
 }
 
 .proposal-voting {

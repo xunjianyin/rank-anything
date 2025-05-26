@@ -1751,9 +1751,23 @@ function renderUserRecentActivity(activities) {
                 }
                 break;
             case 'proposal_created':
-                activityText = `Created ${activity.proposal_type} proposal for ${activity.target_type}`;
+                activityText = `Created ${activity.proposal_type} proposal for ${activity.target_type} (ID: ${activity.target_id})`;
+                if (activity.status) {
+                    const statusColor = activity.status === 'approved' ? '#38a169' : activity.status === 'rejected' ? '#e53e3e' : '#718096';
+                    extraInfo += ` - <span style="color: ${statusColor}; font-weight: bold;">${activity.status.toUpperCase()}</span>`;
+                }
                 if (activity.reason) {
-                    extraInfo = ` - Reason: "${escapeHtml(activity.reason)}"`;
+                    extraInfo += ` - Reason: "${escapeHtml(activity.reason)}"`;
+                }
+                if (activity.new_value && activity.proposal_type === 'edit') {
+                    try {
+                        const changes = JSON.parse(activity.new_value);
+                        if (changes.name) {
+                            extraInfo += ` - Proposed name: "${escapeHtml(changes.name)}"`;
+                        }
+                    } catch (e) {
+                        extraInfo += ` - Proposed change: "${escapeHtml(activity.new_value)}"`;
+                    }
                 }
                 break;
             case 'vote_cast':
@@ -1998,6 +2012,7 @@ async function adminApproveProposal(proposalId) {
         if (typeof document.renderProposals === 'function') {
             document.renderProposals();
         }
+        updateProposalCount();
     } catch (error) {
         alert('Failed to approve proposal: ' + error.message);
     }
@@ -2020,6 +2035,7 @@ async function adminVetoProposal(proposalId) {
         if (typeof document.renderProposals === 'function') {
             document.renderProposals();
         }
+        updateProposalCount();
     } catch (error) {
         alert('Failed to reject proposal: ' + error.message);
     }
@@ -2358,6 +2374,33 @@ async function executeProposal(proposalId) {
     return await res.json();
 }
 
+// Helper function to get current state of proposal target
+async function getProposalTargetCurrentState(proposal) {
+    try {
+        if (proposal.target_type === 'topic') {
+            const topic = await fetchTopic(proposal.target_id);
+            if (!topic) return null;
+            const tags = await fetchTopicTags(proposal.target_id);
+            return {
+                name: topic.name,
+                tags: tags.map(tag => tag.name)
+            };
+        } else if (proposal.target_type === 'object') {
+            const object = await fetchObject(proposal.target_id);
+            if (!object) return null;
+            const tags = await fetchObjectTags(proposal.target_id);
+            return {
+                name: object.name,
+                tags: tags.map(tag => tag.name)
+            };
+        }
+        return null;
+    } catch (error) {
+        console.error('Error fetching target state:', error);
+        return null;
+    }
+}
+
 // Example: render proposals page using API
 document.renderProposals = async function renderProposals() {
     const proposalsList = document.getElementById('proposals-list');
@@ -2368,22 +2411,85 @@ document.renderProposals = async function renderProposals() {
             proposalsList.innerHTML = `<div class="empty-state"><h3>No pending proposals</h3></div>`;
             return;
         }
-        proposalsList.innerHTML = proposals.map(p => {
+        
+        // Render each proposal with current state comparison
+        const proposalElements = [];
+        for (const p of proposals) {
             const isAdmin = currentUser && currentUser.isAdmin;
-            const formatNewValue = () => {
-                if (!p.new_value) return 'N/A';
-                try {
-                    const parsed = JSON.parse(p.new_value);
-                    if (parsed.name && parsed.tags) {
-                        return `Name: "${parsed.name}", Tags: [${parsed.tags.join(', ')}]`;
-                    }
-                    return p.new_value;
-                } catch {
-                    return p.new_value;
-                }
-            };
+            const currentState = await getProposalTargetCurrentState(p);
             
-            return `
+            let changeDisplay = '';
+            if (p.type === 'edit' && p.new_value && currentState) {
+                try {
+                    const proposedChanges = JSON.parse(p.new_value);
+                    
+                    // Show name change if different
+                    if (proposedChanges.name && proposedChanges.name !== currentState.name) {
+                        changeDisplay += `
+                            <div class="proposal-change">
+                                <div class="original-content">
+                                    <strong>Current Name:</strong><br>
+                                    "${escapeHtml(currentState.name)}"
+                                </div>
+                                <div class="change-arrow">→</div>
+                                <div class="proposed-content">
+                                    <strong>Proposed Name:</strong><br>
+                                    "${escapeHtml(proposedChanges.name)}"
+                                </div>
+                            </div>
+                        `;
+                    }
+                    
+                    // Show tag changes if different
+                    if (proposedChanges.tags && JSON.stringify(proposedChanges.tags.sort()) !== JSON.stringify(currentState.tags.sort())) {
+                        changeDisplay += `
+                            <div class="proposal-change">
+                                <div class="original-content">
+                                    <strong>Current Tags:</strong><br>
+                                    ${currentState.tags.length > 0 ? currentState.tags.map(tag => `<span class="tag">${escapeHtml(tag)}</span>`).join(' ') : '<em>No tags</em>'}
+                                </div>
+                                <div class="change-arrow">→</div>
+                                <div class="proposed-content">
+                                    <strong>Proposed Tags:</strong><br>
+                                    ${proposedChanges.tags.length > 0 ? proposedChanges.tags.map(tag => `<span class="tag">${escapeHtml(tag)}</span>`).join(' ') : '<em>No tags</em>'}
+                                </div>
+                            </div>
+                        `;
+                    }
+                } catch (error) {
+                    // Fallback for non-JSON new_value
+                    changeDisplay = `
+                        <div class="proposal-change">
+                            <div class="original-content">
+                                <strong>Current:</strong><br>
+                                "${escapeHtml(currentState.name)}"
+                            </div>
+                            <div class="change-arrow">→</div>
+                            <div class="proposed-content">
+                                <strong>Proposed:</strong><br>
+                                "${escapeHtml(p.new_value)}"
+                            </div>
+                        </div>
+                    `;
+                }
+            } else if (p.type === 'delete' && currentState) {
+                changeDisplay = `
+                    <div class="proposal-change">
+                        <div class="original-content">
+                            <strong>Current ${p.target_type}:</strong><br>
+                            "${escapeHtml(currentState.name)}"<br>
+                            ${currentState.tags.length > 0 ? `Tags: ${currentState.tags.map(tag => `<span class="tag">${escapeHtml(tag)}</span>`).join(' ')}` : ''}
+                        </div>
+                        <div class="change-arrow">→</div>
+                        <div class="proposed-content" style="background: #fed7d7; border-left-color: #e53e3e;">
+                            <strong>Will be deleted</strong><br>
+                            <em>This ${p.target_type} will be permanently removed</em>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            proposalElements.push(`
                 <div class="proposal-item">
                     <div class="proposal-header">
                         <span class="proposal-type">${escapeHtml(p.type.toUpperCase())} ${escapeHtml(p.target_type.toUpperCase())}</span>
@@ -2392,8 +2498,9 @@ document.renderProposals = async function renderProposals() {
                     <div class="proposal-content">
                         <div><strong>Target ID:</strong> ${p.target_id}</div>
                         ${p.reason ? `<div><strong>Reason:</strong> ${escapeHtml(p.reason)}</div>` : ''}
-                        ${p.new_value ? `<div><strong>Proposed Changes:</strong> ${escapeHtml(formatNewValue())}</div>` : ''}
                         <div><strong>Created:</strong> ${formatDate(p.created_at)}</div>
+                        ${changeDisplay}
+                        ${!currentState ? `<div class="error-notice" style="color: #e53e3e; font-style: italic;">⚠️ Target ${p.target_type} not found - may have been deleted</div>` : ''}
                     </div>
                     <div class="proposal-voting">
                         <div class="voting-actions">
@@ -2417,8 +2524,10 @@ document.renderProposals = async function renderProposals() {
                         </div>
                     </div>
                 </div>
-            `;
-        }).join('');
+            `);
+        }
+        
+        proposalsList.innerHTML = proposalElements.join('');
     } catch (e) {
         proposalsList.innerHTML = '<div class="error">Failed to load proposals.</div>';
     }
@@ -2429,6 +2538,7 @@ window.voteProposalUI = async function(proposalId, vote) {
         await voteProposal(proposalId, vote);
         showNotification('Vote submitted!');
         document.renderProposals();
+        updateProposalCount();
     } catch (e) {
         alert('Failed to vote: ' + e.message);
     }
@@ -2439,6 +2549,7 @@ window.executeProposalUI = async function(proposalId) {
         await executeProposal(proposalId);
         showNotification('Proposal executed!');
         document.renderProposals();
+        updateProposalCount();
     } catch (e) {
         alert('Failed to execute proposal: ' + e.message);
     }
