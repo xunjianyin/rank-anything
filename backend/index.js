@@ -23,6 +23,9 @@ const EMAIL_CONFIG = {
   auth: {
     user: 'rank_anything@163.com',
     pass: process.env.EMAIL_PASSWORD || 'RankAnything2025'
+  },
+  tls: {
+    rejectUnauthorized: false
   }
 };
 
@@ -133,30 +136,10 @@ app.post('/api/register', validateContent, async (req, res) => {
             const emailResult = await sendVerificationEmail(email, verificationCode, username);
             if (!emailResult.success) {
               console.error('Failed to send verification email:', emailResult.error);
-              // For now, auto-verify users if email fails (temporary solution)
-              db.run('UPDATE users SET email_verified = 1 WHERE id = ?', [userId], (err) => {
-                if (err) return res.status(500).json({ error: 'Database error.' });
-                
-                const token = jwt.sign({ 
-                  id: userId, 
-                  username: username, 
-                  email: email, 
-                  isAdmin: false 
-                }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
-                
-                res.json({ 
-                  token, 
-                  user: { 
-                    id: userId, 
-                    username: username, 
-                    email: email, 
-                    isAdmin: false,
-                    emailVerified: true
-                  },
-                  message: 'Registration successful! (Email verification temporarily disabled)'
-                });
+              return res.status(500).json({ 
+                error: 'Failed to send verification email. Please try again later.',
+                details: emailResult.error
               });
-              return;
             }
             
             res.json({ 
