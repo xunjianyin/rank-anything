@@ -195,12 +195,22 @@ async function performRegister() {
             }
             console.log('Registration completed successfully');
         } else {
-            alert(result.error || 'Registration failed');
+            // Check if it's a content filter error
+            if (result.error && (result.error.includes('sensitive content') || result.error.includes('inappropriate content'))) {
+                alert('Content Filter Error: ' + result.error + '\n\nPlease choose a different username that does not contain inappropriate content.');
+            } else {
+                alert(result.error || 'Registration failed');
+            }
         }
     } catch (error) {
         console.error('Registration error details:', error);
-        console.error('Error stack:', error.stack);
-        alert('Registration failed with error: ' + error.message + '. Check console for details.');
+        console.error('Error stack:', error);
+        // Check if it's a content filter error
+        if (error.message.includes('sensitive content') || error.message.includes('inappropriate content')) {
+            alert('Content Filter Error: ' + error.message + '\n\nPlease choose a different username that does not contain inappropriate content.');
+        } else {
+            alert('Registration failed with error: ' + error.message + '. Check console for details.');
+        }
     }
 }
 
@@ -1368,7 +1378,12 @@ async function addTopic(event) {
         hideAddTopicForm();
         showNotification('Topic created!');
     } catch (e) {
-        alert('Failed to create topic: ' + e.message);
+        // Check if it's a content filter error
+        if (e.message.includes('sensitive content') || e.message.includes('inappropriate content')) {
+            alert('Content Filter Error: ' + e.message + '\n\nPlease revise your topic name or tags to remove any inappropriate content.');
+        } else {
+            alert('Failed to create topic: ' + e.message);
+        }
         // Revert daily usage increment on failure
         const usage = getCurrentDailyUsage();
         usage.topics = Math.max(0, usage.topics - 1);
@@ -1529,7 +1544,12 @@ async function addObject(event) {
         hideAddObjectForm();
         showNotification('Object created!');
     } catch (e) {
-        alert('Failed to create object: ' + e.message);
+        // Check if it's a content filter error
+        if (e.message.includes('sensitive content') || e.message.includes('inappropriate content')) {
+            alert('Content Filter Error: ' + e.message + '\n\nPlease revise your object name or tags to remove any inappropriate content.');
+        } else {
+            alert('Failed to create object: ' + e.message);
+        }
         // Revert daily usage increment on failure
         const usage = getCurrentDailyUsage();
         usage.objects = Math.max(0, usage.objects - 1);
@@ -1688,7 +1708,12 @@ async function submitRating() {
             document.getElementById('submit-rating-btn').textContent = 'Update Rating';
         }
     } catch (e) {
-        alert('Failed to submit rating: ' + e.message);
+        // Check if it's a content filter error
+        if (e.message.includes('sensitive content') || e.message.includes('inappropriate content')) {
+            alert('Content Filter Error: ' + e.message + '\n\nPlease revise your review text to remove any inappropriate content.');
+        } else {
+            alert('Failed to submit rating: ' + e.message);
+        }
     }
 }
 
@@ -2424,9 +2449,33 @@ function closeAdminPanel() {
 
 async function renderAdminPanel() {
     const modal = document.getElementById('admin-panel-modal');
-    let html = `<div class='modal-content admin-panel-modal-content'><div class='modal-header'><h2>Admin Panel</h2><button class='modal-close' onclick='closeAdminPanel()'><i class='fas fa-times'></i></button></div><div class='modal-body'><h3>All Users</h3><div id='admin-users-list'>Loading...</div></div></div>`;
+    let html = `
+        <div class='modal-content admin-panel-modal-content'>
+            <div class='modal-header'>
+                <h2>Admin Panel</h2>
+                <button class='modal-close' onclick='closeAdminPanel()'>
+                    <i class='fas fa-times'></i>
+                </button>
+            </div>
+            <div class='modal-body'>
+                <div class="admin-tabs">
+                    <button class="admin-tab active" onclick="showAdminTab('users')">User Management</button>
+                    <button class="admin-tab" onclick="showAdminTab('content-filter')">Content Filter</button>
+                </div>
+                <div id="admin-users-tab" class="admin-tab-content active">
+                    <h3>All Users</h3>
+                    <div id='admin-users-list'>Loading...</div>
+                </div>
+                <div id="admin-content-filter-tab" class="admin-tab-content" style="display: none;">
+                    <h3>Content Filter Management</h3>
+                    <div id='admin-content-filter-content'>Loading...</div>
+                </div>
+            </div>
+        </div>
+    `;
     modal.innerHTML = html;
     await renderAdminUsersList();
+    await renderAdminContentFilter();
 }
 
 async function renderAdminUsersList() {
@@ -2515,6 +2564,25 @@ async function adminDeleteUser(userId, username) {
     } catch (error) {
         alert('Failed to delete user: ' + error.message);
     }
+}
+
+// Admin tab switching
+function showAdminTab(tabName) {
+    // Hide all tab contents
+    document.querySelectorAll('.admin-tab-content').forEach(tab => {
+        tab.style.display = 'none';
+    });
+    
+    // Remove active class from all tabs
+    document.querySelectorAll('.admin-tab').forEach(tab => {
+        tab.classList.remove('active');
+    });
+    
+    // Show selected tab content
+    document.getElementById(`admin-${tabName}-tab`).style.display = 'block';
+    
+    // Add active class to selected tab
+    event.target.classList.add('active');
 }
 
 // Admin direct edit/delete for topics/objects/users
@@ -3947,3 +4015,226 @@ function hideAddObjectForm() {
     document.getElementById('object-name').value = '';
     document.getElementById('object-tags').value = '';
 }
+
+// Content Filter Management Functions
+async function renderAdminContentFilter() {
+    const container = document.getElementById('admin-content-filter-content');
+    
+    try {
+        const token = getAuthToken();
+        const response = await fetch(BACKEND_URL + '/api/admin/content-filter', {
+            headers: { 'Authorization': 'Bearer ' + token }
+        });
+        
+        if (!response.ok) {
+            throw new Error('Failed to fetch content filter data');
+        }
+        
+        const filterData = await response.json();
+        
+        let html = `
+            <div class="content-filter-management">
+                <div class="content-filter-test">
+                    <h4>Test Content</h4>
+                    <textarea id="content-test-input" placeholder="Enter text to test against content filter..." rows="3" style="width: 100%; margin-bottom: 10px;"></textarea>
+                    <button class="btn btn-primary" onclick="testContent()">Test Content</button>
+                    <div id="content-test-result" style="margin-top: 10px;"></div>
+                </div>
+                
+                <div class="content-filter-categories" style="margin-top: 30px;">
+                    <h4>Filter Categories</h4>
+        `;
+        
+        for (const [category, data] of Object.entries(filterData)) {
+            html += `
+                <div class="filter-category" style="margin-bottom: 20px; border: 1px solid #ddd; padding: 15px; border-radius: 5px;">
+                    <h5 style="margin: 0 0 10px 0; text-transform: capitalize;">${category}</h5>
+                    <p style="margin: 0 0 10px 0; color: #666;">
+                        ${data.count} words | Preview: ${data.words.join(', ')}${data.count > 10 ? '...' : ''}
+                    </p>
+                    <div class="filter-category-actions">
+                        <button class="btn btn-secondary btn-small" onclick="viewCategoryWords('${category}')">View All</button>
+                        <button class="btn btn-primary btn-small" onclick="addWordsToCategory('${category}')">Add Words</button>
+                        <button class="btn btn-danger btn-small" onclick="removeWordsFromCategory('${category}')">Remove Words</button>
+                    </div>
+                </div>
+            `;
+        }
+        
+        html += `
+                </div>
+            </div>
+        `;
+        
+        container.innerHTML = html;
+    } catch (error) {
+        container.innerHTML = '<div class="error">Failed to load content filter: ' + error.message + '</div>';
+    }
+}
+
+async function testContent() {
+    const input = document.getElementById('content-test-input');
+    const result = document.getElementById('content-test-result');
+    const text = input.value.trim();
+    
+    if (!text) {
+        result.innerHTML = '<div class="error">Please enter some text to test</div>';
+        return;
+    }
+    
+    try {
+        const token = getAuthToken();
+        const response = await fetch(BACKEND_URL + '/api/admin/content-filter/test', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + token
+            },
+            body: JSON.stringify({ text })
+        });
+        
+        if (!response.ok) {
+            throw new Error('Failed to test content');
+        }
+        
+        const testResult = await response.json();
+        
+        let html = `
+            <div class="content-test-result">
+                <h5>Test Result: ${testResult.isClean ? '<span style="color: green;">✓ Clean</span>' : '<span style="color: red;">✗ Contains Sensitive Content</span>'}</h5>
+        `;
+        
+        if (!testResult.isClean) {
+            html += `
+                <p><strong>Message:</strong> ${testResult.message}</p>
+                <p><strong>Violations:</strong></p>
+                <ul>
+            `;
+            testResult.violations.forEach(violation => {
+                html += `<li><strong>${violation.category}:</strong> ${violation.matches.join(', ')} (${violation.count} matches)</li>`;
+            });
+            html += '</ul>';
+        }
+        
+        html += `
+                <p><strong>Sanitized:</strong> ${escapeHtml(testResult.sanitized)}</p>
+            </div>
+        `;
+        
+        result.innerHTML = html;
+    } catch (error) {
+        result.innerHTML = '<div class="error">Failed to test content: ' + error.message + '</div>';
+    }
+}
+
+async function viewCategoryWords(category) {
+    try {
+        const token = getAuthToken();
+        const response = await fetch(BACKEND_URL + `/api/admin/content-filter/${category}`, {
+            headers: { 'Authorization': 'Bearer ' + token }
+        });
+        
+        if (!response.ok) {
+            throw new Error('Failed to fetch category words');
+        }
+        
+        const data = await response.json();
+        
+        const modal = document.createElement('div');
+        modal.className = 'modal-overlay';
+        modal.innerHTML = `
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Words in "${category}" category</h3>
+                    <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <p><strong>Total words:</strong> ${data.words.length}</p>
+                    <div style="max-height: 400px; overflow-y: auto; border: 1px solid #ddd; padding: 10px; background: #f9f9f9;">
+                        ${data.words.map(word => `<span style="display: inline-block; background: #e2e8f0; padding: 2px 6px; margin: 2px; border-radius: 3px; font-size: 0.9em;">${escapeHtml(word)}</span>`).join('')}
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(modal);
+    } catch (error) {
+        alert('Failed to view category words: ' + error.message);
+    }
+}
+
+async function addWordsToCategory(category) {
+    const words = prompt(`Enter words to add to "${category}" category (comma-separated):`);
+    if (!words) return;
+    
+    const wordList = words.split(',').map(w => w.trim()).filter(w => w.length > 0);
+    if (wordList.length === 0) {
+        alert('No valid words entered');
+        return;
+    }
+    
+    try {
+        const token = getAuthToken();
+        const response = await fetch(BACKEND_URL + `/api/admin/content-filter/${category}/words`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + token
+            },
+            body: JSON.stringify({ words: wordList })
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to add words');
+        }
+        
+        const result = await response.json();
+        showNotification(`Added ${result.added} words to ${category} category. Total: ${result.total} words.`);
+        await renderAdminContentFilter();
+    } catch (error) {
+        alert('Failed to add words: ' + error.message);
+    }
+}
+
+async function removeWordsFromCategory(category) {
+    const words = prompt(`Enter words to remove from "${category}" category (comma-separated):`);
+    if (!words) return;
+    
+    const wordList = words.split(',').map(w => w.trim()).filter(w => w.length > 0);
+    if (wordList.length === 0) {
+        alert('No valid words entered');
+        return;
+    }
+    
+    try {
+        const token = getAuthToken();
+        const response = await fetch(BACKEND_URL + `/api/admin/content-filter/${category}/words`, {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + token
+            },
+            body: JSON.stringify({ words: wordList })
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to remove words');
+        }
+        
+        const result = await response.json();
+        showNotification(`Removed ${result.removed} words from ${category} category. Total: ${result.total} words.`);
+        await renderAdminContentFilter();
+    } catch (error) {
+        alert('Failed to remove words: ' + error.message);
+    }
+}
+
+// Make content filter functions globally available
+window.testContent = testContent;
+window.viewCategoryWords = viewCategoryWords;
+window.addWordsToCategory = addWordsToCategory;
+window.removeWordsFromCategory = removeWordsFromCategory;

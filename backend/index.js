@@ -4,12 +4,16 @@ const { init, db } = require('./db');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const nodemailer = require('nodemailer');
+const ContentFilter = require('./contentFilter');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
 const JWT_SECRET = process.env.JWT_SECRET || 'rankanything_secret';
 const JWT_EXPIRES_IN = '7d';
+
+// Initialize content filter
+const contentFilter = new ContentFilter();
 
 // Email configuration
 const EMAIL_CONFIG = {
@@ -93,7 +97,7 @@ app.get('/api/health', (req, res) => {
 });
 
 // User registration
-app.post('/api/register', async (req, res) => {
+app.post('/api/register', validateContent, async (req, res) => {
   const { username, email, password } = req.body;
   if (!username || !email || !password) {
     return res.status(400).json({ error: 'All fields are required.' });
@@ -310,6 +314,54 @@ function authenticateToken(req, res, next) {
   });
 }
 
+// Content filtering middleware
+function validateContent(req, res, next) {
+  const fieldsToCheck = ['name', 'review', 'reason', 'new_value', 'username'];
+  const violations = [];
+  
+  for (const field of fieldsToCheck) {
+    if (req.body[field]) {
+      const result = contentFilter.checkContent(req.body[field]);
+      if (!result.isClean) {
+        violations.push({
+          field,
+          violations: result.violations,
+          message: contentFilter.generateErrorMessage(result.violations)
+        });
+      }
+    }
+  }
+  
+  // Check tags array if present
+  if (req.body.tags && Array.isArray(req.body.tags)) {
+    for (let i = 0; i < req.body.tags.length; i++) {
+      const result = contentFilter.checkContent(req.body.tags[i]);
+      if (!result.isClean) {
+        violations.push({
+          field: `tags[${i}]`,
+          violations: result.violations,
+          message: contentFilter.generateErrorMessage(result.violations)
+        });
+      }
+    }
+  }
+  
+  if (violations.length > 0) {
+    console.log('Content filter violations:', JSON.stringify(violations, null, 2));
+    return res.status(400).json({ 
+      error: 'Content contains inappropriate material. Please revise your text and try again.',
+      violations: violations.map(v => ({ field: v.field, message: v.message }))
+    });
+  }
+  
+  next();
+}
+
+// Helper function to validate content and return result
+function checkContentSafety(text) {
+  return contentFilter.checkContent(text);
+}
+
 // --- Topic Endpoints ---
 // List all topics
 app.get('/api/topics', (req, res) => {
@@ -319,7 +371,7 @@ app.get('/api/topics', (req, res) => {
   });
 });
 // Create a topic
-app.post('/api/topics', authenticateToken, (req, res) => {
+app.post('/api/topics', authenticateToken, validateContent, (req, res) => {
   const { name, tags } = req.body;
   if (!name) return res.status(400).json({ error: 'Name is required.' });
   
@@ -375,7 +427,7 @@ app.post('/api/topics', authenticateToken, (req, res) => {
   });
 });
 // Edit a topic (only creator or admin)
-app.put('/api/topics/:id', authenticateToken, (req, res) => {
+app.put('/api/topics/:id', authenticateToken, validateContent, (req, res) => {
   const { name, tags } = req.body;
   const topicId = req.params.id;
   
@@ -467,7 +519,7 @@ app.get('/api/topics/:topicId/objects', (req, res) => {
   });
 });
 // Create an object in a topic
-app.post('/api/topics/:topicId/objects', authenticateToken, (req, res) => {
+app.post('/api/topics/:topicId/objects', authenticateToken, validateContent, (req, res) => {
   const topicId = req.params.topicId;
   const { name } = req.body;
   if (!name) return res.status(400).json({ error: 'Name is required.' });
@@ -522,7 +574,7 @@ app.post('/api/topics/:topicId/objects', authenticateToken, (req, res) => {
   });
 });
 // Edit an object (only creator or admin)
-app.put('/api/objects/:id', authenticateToken, (req, res) => {
+app.put('/api/objects/:id', authenticateToken, validateContent, (req, res) => {
   const { name } = req.body;
   const objectId = req.params.id;
   
@@ -579,7 +631,7 @@ app.get('/api/tags', (req, res) => {
   });
 });
 // Create a tag
-app.post('/api/tags', authenticateToken, (req, res) => {
+app.post('/api/tags', authenticateToken, validateContent, (req, res) => {
   const { name } = req.body;
   if (!name) return res.status(400).json({ error: 'Name is required.' });
   db.run('INSERT OR IGNORE INTO tags (name) VALUES (?)', [name], function(err) {
@@ -591,7 +643,7 @@ app.post('/api/tags', authenticateToken, (req, res) => {
   });
 });
 // Assign tags to an object (replace all tags)
-app.post('/api/objects/:objectId/tags', authenticateToken, (req, res) => {
+app.post('/api/objects/:objectId/tags', authenticateToken, validateContent, (req, res) => {
   const objectId = req.params.objectId;
   const { tags } = req.body; // array of tag names
   if (!Array.isArray(tags)) return res.status(400).json({ error: 'Tags must be an array.' });
@@ -645,7 +697,7 @@ app.get('/api/tags/:tagName/objects', (req, res) => {
 
 // --- Topic Tag Endpoints ---
 // Assign tags to a topic (replace all tags)
-app.post('/api/topics/:topicId/tags', authenticateToken, (req, res) => {
+app.post('/api/topics/:topicId/tags', authenticateToken, validateContent, (req, res) => {
   const topicId = req.params.topicId;
   const { tags } = req.body; // array of tag names
   if (!Array.isArray(tags)) return res.status(400).json({ error: 'Tags must be an array.' });
@@ -701,7 +753,7 @@ app.get('/api/objects/:objectId/ratings', (req, res) => {
   });
 });
 // Create or update a rating/review for an object (one per user per object per day)
-app.post('/api/objects/:objectId/ratings', authenticateToken, (req, res) => {
+app.post('/api/objects/:objectId/ratings', authenticateToken, validateContent, (req, res) => {
   const objectId = req.params.objectId;
   const { rating, review } = req.body;
   if (!rating || rating < 1 || rating > 5) return res.status(400).json({ error: 'Rating must be 1-5.' });
@@ -778,7 +830,7 @@ app.get('/api/moderation/proposals', authenticateToken, (req, res) => {
   });
 });
 // Create a moderation proposal
-app.post('/api/moderation/proposals', authenticateToken, (req, res) => {
+app.post('/api/moderation/proposals', authenticateToken, validateContent, (req, res) => {
   const { type, target_type, target_id, new_value, reason } = req.body;
   if (!type || !target_type || !target_id) return res.status(400).json({ error: 'Missing required fields.' });
   db.run('INSERT INTO moderation_proposals (type, target_type, target_id, proposer_id, new_value, reason) VALUES (?, ?, ?, ?, ?, ?)',
@@ -1065,7 +1117,7 @@ app.get('/api/users/:id/stats', authenticateToken, (req, res) => {
 });
 
 // Update user profile
-app.put('/api/users/:id/profile', authenticateToken, (req, res) => {
+app.put('/api/users/:id/profile', authenticateToken, validateContent, (req, res) => {
   const userId = req.params.id;
   const { username, email, currentPassword, newPassword } = req.body;
   
@@ -1349,6 +1401,121 @@ app.get('/api/users/:id/restrictions', authenticateToken, (req, res) => {
       is_restricted: !!restriction,
       restriction: restriction || null
     });
+  });
+});
+
+// --- Content Filter Management Endpoints (Admin Only) ---
+
+// Get content filter categories and word counts
+app.get('/api/admin/content-filter', authenticateToken, (req, res) => {
+  if (!req.user.isAdmin) return res.status(403).json({ error: 'Admin access required.' });
+  
+  const categories = contentFilter.getCategories();
+  const summary = {};
+  
+  for (const category of categories) {
+    const words = contentFilter.getSensitiveWords(category);
+    summary[category] = {
+      count: words.length,
+      words: words.slice(0, 10) // Show first 10 words as preview
+    };
+  }
+  
+  res.json(summary);
+});
+
+// Get all words for a specific category
+app.get('/api/admin/content-filter/:category', authenticateToken, (req, res) => {
+  if (!req.user.isAdmin) return res.status(403).json({ error: 'Admin access required.' });
+  
+  const category = req.params.category;
+  const words = contentFilter.getSensitiveWords(category);
+  
+  if (words.length === 0) {
+    return res.status(404).json({ error: 'Category not found.' });
+  }
+  
+  res.json({ category, words });
+});
+
+// Add words to a category
+app.post('/api/admin/content-filter/:category/words', authenticateToken, validateContent, (req, res) => {
+  if (!req.user.isAdmin) return res.status(403).json({ error: 'Admin access required.' });
+  
+  const category = req.params.category;
+  const { words } = req.body;
+  
+  if (!Array.isArray(words) || words.length === 0) {
+    return res.status(400).json({ error: 'Words array is required.' });
+  }
+  
+  // Validate that words don't contain sensitive content themselves
+  for (const word of words) {
+    if (typeof word !== 'string' || word.trim().length === 0) {
+      return res.status(400).json({ error: 'All words must be non-empty strings.' });
+    }
+  }
+  
+  try {
+    contentFilter.addSensitiveWords(category, words.map(w => w.trim().toLowerCase()));
+    const updatedWords = contentFilter.getSensitiveWords(category);
+    
+    res.json({ 
+      success: true, 
+      category, 
+      added: words.length,
+      total: updatedWords.length 
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to add words.' });
+  }
+});
+
+// Remove words from a category
+app.delete('/api/admin/content-filter/:category/words', authenticateToken, (req, res) => {
+  if (!req.user.isAdmin) return res.status(403).json({ error: 'Admin access required.' });
+  
+  const category = req.params.category;
+  const { words } = req.body;
+  
+  if (!Array.isArray(words) || words.length === 0) {
+    return res.status(400).json({ error: 'Words array is required.' });
+  }
+  
+  try {
+    contentFilter.removeSensitiveWords(category, words.map(w => w.trim().toLowerCase()));
+    const updatedWords = contentFilter.getSensitiveWords(category);
+    
+    res.json({ 
+      success: true, 
+      category, 
+      removed: words.length,
+      total: updatedWords.length 
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to remove words.' });
+  }
+});
+
+// Test content against filter
+app.post('/api/admin/content-filter/test', authenticateToken, (req, res) => {
+  if (!req.user.isAdmin) return res.status(403).json({ error: 'Admin access required.' });
+  
+  const { text } = req.body;
+  
+  if (!text || typeof text !== 'string') {
+    return res.status(400).json({ error: 'Text is required.' });
+  }
+  
+  const result = contentFilter.checkContent(text);
+  const sanitized = contentFilter.getSanitizedText(text);
+  
+  res.json({
+    original: text,
+    sanitized,
+    isClean: result.isClean,
+    violations: result.violations,
+    message: result.isClean ? 'Content is clean' : contentFilter.generateErrorMessage(result.violations)
   });
 });
 
