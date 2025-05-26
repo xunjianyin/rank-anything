@@ -17,12 +17,12 @@ const contentFilter = new ContentFilter();
 
 // Email configuration
 const EMAIL_CONFIG = {
-  host: 'smtp.gmail.com',
-  port: 587,
-  secure: false,
+  host: 'smtp.163.com',
+  port: 465,
+  secure: true,
   auth: {
-    user: 'arvidyin@gmail.com',
-    pass: process.env.EMAIL_PASSWORD || 'your-app-password' // Use app password for Gmail
+    user: 'rank_anything@163.com',
+    pass: process.env.EMAIL_PASSWORD || 'RankAnything2025'
   }
 };
 
@@ -53,7 +53,7 @@ function generateVerificationCode() {
 // Send verification email
 async function sendVerificationEmail(email, code, username) {
   const mailOptions = {
-    from: 'arvidyin@gmail.com',
+    from: 'rank_anything@163.com',
     to: email,
     subject: 'Rank-Anything Email Verification',
     html: `
