@@ -1173,15 +1173,19 @@ async function renderSearchTopics() {
             })
         );
         
-        grid.innerHTML = topicsWithCounts.map(topic => {
+        // Render search topics with editors display
+        const topicCards = await Promise.all(topicsWithCounts.map(async (topic) => {
+            const editorsDisplay = await renderEditorsDisplay('topic', topic.id, topic.creator_username || '', topic.creator_id);
             return `
                 <div class="topic-card" onclick="showTopicPage('${topic.id}')">
-                    <div class="card-owner">by ${makeUsernameClickable(topic.creator_username || '', topic.creator_id)}</div>
+                    <div class="card-owner">${editorsDisplay}</div>
                     <h3>${escapeHtml(topic.name)}</h3>
                     <p class="rating-text">${topic.objectCount} item${topic.objectCount !== 1 ? 's' : ''}</p>
                 </div>
             `;
-        }).join('');
+        }));
+        
+        grid.innerHTML = topicCards.join('');
     } catch (error) {
         console.error('Error rendering search topics:', error);
         grid.innerHTML = '<div class="error">Failed to load topic results</div>';
@@ -1223,10 +1227,12 @@ async function renderSearchObjects() {
             })
         );
         
-        grid.innerHTML = objectsWithDetails.map(object => {
+        // Render search objects with editors display
+        const objectCards = await Promise.all(objectsWithDetails.map(async (object) => {
+            const editorsDisplay = await renderEditorsDisplay('object', object.id, object.creator_username || '', object.creator_id);
             return `
                 <div class="object-card" onclick="showObjectFromSearch('${object.topicId}', '${object.id}')">
-                    <div class="card-owner">by ${makeUsernameClickable(object.creator_username || '', object.creator_id)}</div>
+                    <div class="card-owner">${editorsDisplay}</div>
                     <div class="topic-context">From: ${escapeHtml(object.topicName)}</div>
                     <h3>${escapeHtml(object.name)}</h3>
                     ${object.averageRating > 0 ? `
@@ -1246,7 +1252,9 @@ async function renderSearchObjects() {
                     ` : ''}
                 </div>
             `;
-        }).join('');
+        }));
+        
+        grid.innerHTML = objectCards.join('');
     } catch (error) {
         console.error('Error rendering search objects:', error);
         grid.innerHTML = '<div class="error">Failed to load object results</div>';
@@ -1339,15 +1347,20 @@ async function renderTopics() {
             `;
             return;
         }
-        grid.innerHTML = topics.map(topic => {
+        
+        // Render topics with editors display
+        const topicCards = await Promise.all(topics.map(async (topic) => {
+            const editorsDisplay = await renderEditorsDisplay('topic', topic.id, topic.creator_username || '', topic.creator_id);
             return `
                 <div class="topic-card" onclick="showTopicPage('${topic.id}')">
-                    <div class="card-owner">by ${makeUsernameClickable(topic.creator_username || '', topic.creator_id)}</div>
+                    <div class="card-owner">${editorsDisplay}</div>
                     <h3>${escapeHtml(topic.name)}</h3>
                     <p class="rating-text">Created: ${formatDate(topic.created_at)}</p>
                 </div>
             `;
-        }).join('');
+        }));
+        
+        grid.innerHTML = topicCards.join('');
     } catch (e) {
         grid.innerHTML = '<div class="error">Failed to load topics.</div>';
     }
@@ -1485,10 +1498,12 @@ async function renderObjects() {
             }
         }));
         
-        grid.innerHTML = objectsWithTags.map(object => {
+        // Render objects with editors display
+        const objectCards = await Promise.all(objectsWithTags.map(async (object) => {
+            const editorsDisplay = await renderEditorsDisplay('object', object.id, object.creator_username || '', object.creator_id);
             return `
                 <div class="object-card" onclick="showObjectPage('${object.id}')">
-                    <div class="card-owner">by ${makeUsernameClickable(object.creator_username || '', object.creator_id)}</div>
+                    <div class="card-owner">${editorsDisplay}</div>
                     <h3>${escapeHtml(object.name)}</h3>
                     <div class="rating">
                         <span class="rating-text">Created: ${formatDate(object.created_at)}</span>
@@ -1500,7 +1515,9 @@ async function renderObjects() {
                     ` : ''}
                 </div>
             `;
-        }).join('');
+        }));
+        
+        grid.innerHTML = objectCards.join('');
     } catch (e) {
         grid.innerHTML = '<div class="error">Failed to load objects.</div>';
     }
@@ -2019,6 +2036,30 @@ async function checkUserRestrictions(userId) {
     return await res.json();
 }
 
+// Fetch editors for a topic or object
+async function fetchEditors(targetType, targetId) {
+    try {
+        const res = await fetch(BACKEND_URL + `/api/editors/${targetType}/${targetId}`);
+        if (!res.ok) throw new Error('Failed to fetch editors');
+        return await res.json();
+    } catch (error) {
+        console.error('Error fetching editors:', error);
+        return [];
+    }
+}
+
+// Fetch edit history for a topic or object
+async function fetchEditHistory(targetType, targetId) {
+    try {
+        const res = await fetch(BACKEND_URL + `/api/edit-history/${targetType}/${targetId}`);
+        if (!res.ok) throw new Error('Failed to fetch edit history');
+        return await res.json();
+    } catch (error) {
+        console.error('Error fetching edit history:', error);
+        return [];
+    }
+}
+
 async function updateUserProfile(userId, username, email) {
     const token = getAuthToken();
     const res = await fetch(BACKEND_URL + `/api/users/${userId}/profile`, {
@@ -2462,6 +2503,118 @@ async function removeUserRatingUI(userId) {
 function makeUsernameClickable(username, userId) {
     if (!userId) return escapeHtml(username);
     return `<span class="clickable-username" onclick="showUserProfilePage('${userId}')">${escapeHtml(username)}</span>`;
+}
+
+// Render editors display with ellipsis for more than 3 editors
+async function renderEditorsDisplay(targetType, targetId, creatorUsername, creatorId) {
+    try {
+        const editors = await fetchEditors(targetType, targetId);
+        
+        // If no edit history, just show creator
+        if (editors.length === 0) {
+            return `by ${makeUsernameClickable(creatorUsername, creatorId)}`;
+        }
+        
+        // Get unique editors (including creator if they edited)
+        const uniqueEditors = [];
+        const seenIds = new Set();
+        
+        // Add creator first if they're in the edit history
+        const creatorInHistory = editors.find(e => e.id === creatorId);
+        if (creatorInHistory) {
+            uniqueEditors.push(creatorInHistory);
+            seenIds.add(creatorId);
+        } else {
+            // Add creator even if not in edit history
+            uniqueEditors.push({ id: creatorId, username: creatorUsername });
+            seenIds.add(creatorId);
+        }
+        
+        // Add other editors
+        editors.forEach(editor => {
+            if (!seenIds.has(editor.id)) {
+                uniqueEditors.push(editor);
+                seenIds.add(editor.id);
+            }
+        });
+        
+        if (uniqueEditors.length === 1) {
+            return `by ${makeUsernameClickable(uniqueEditors[0].username, uniqueEditors[0].id)}`;
+        }
+        
+        if (uniqueEditors.length <= 3) {
+            const editorLinks = uniqueEditors.map(editor => 
+                makeUsernameClickable(editor.username, editor.id)
+            );
+            return `by ${editorLinks.join(', ')}`;
+        }
+        
+        // More than 3 editors - show first 3 and ellipsis
+        const firstThree = uniqueEditors.slice(0, 3);
+        const remaining = uniqueEditors.slice(3);
+        
+        const firstThreeLinks = firstThree.map(editor => 
+            makeUsernameClickable(editor.username, editor.id)
+        );
+        
+        const ellipsisId = `editors-ellipsis-${targetType}-${targetId}`;
+        const popupId = `editors-popup-${targetType}-${targetId}`;
+        
+        return `by ${firstThreeLinks.join(', ')}, <span class="editors-ellipsis" id="${ellipsisId}" onclick="showEditorsPopup('${popupId}', event)">...</span>
+            <div class="editors-popup" id="${popupId}" style="display: none;">
+                <div class="editors-popup-content">
+                    <div class="editors-popup-header">
+                        <h4>All Editors</h4>
+                        <button class="close-popup" onclick="hideEditorsPopup('${popupId}')">&times;</button>
+                    </div>
+                    <div class="editors-list">
+                        ${uniqueEditors.map(editor => `
+                            <div class="editor-item">
+                                ${makeUsernameClickable(editor.username, editor.id)}
+                                ${editor.first_edit ? `<span class="edit-date">First edit: ${formatDate(editor.first_edit)}</span>` : ''}
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            </div>`;
+    } catch (error) {
+        console.error('Error rendering editors display:', error);
+        return `by ${makeUsernameClickable(creatorUsername, creatorId)}`;
+    }
+}
+
+// Show editors popup
+function showEditorsPopup(popupId, event) {
+    event.stopPropagation();
+    const popup = document.getElementById(popupId);
+    if (popup) {
+        popup.style.display = 'block';
+        
+        // Position popup near the ellipsis
+        const rect = event.target.getBoundingClientRect();
+        popup.style.position = 'fixed';
+        popup.style.left = rect.left + 'px';
+        popup.style.top = (rect.bottom + 5) + 'px';
+        popup.style.zIndex = '1000';
+        
+        // Close popup when clicking outside
+        setTimeout(() => {
+            document.addEventListener('click', function closePopup(e) {
+                if (!popup.contains(e.target)) {
+                    hideEditorsPopup(popupId);
+                    document.removeEventListener('click', closePopup);
+                }
+            });
+        }, 100);
+    }
+}
+
+// Hide editors popup
+function hideEditorsPopup(popupId) {
+    const popup = document.getElementById(popupId);
+    if (popup) {
+        popup.style.display = 'none';
+    }
 }
 
 // Admin panel UI

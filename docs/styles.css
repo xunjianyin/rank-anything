@@ -2048,4 +2048,120 @@ body {
         margin: 1rem;
         max-width: calc(100% - 2rem);
     }
+}
+
+/* Editors Display Styles */
+.editors-ellipsis {
+    color: #667eea;
+    cursor: pointer;
+    font-weight: 500;
+    text-decoration: underline;
+    transition: color 0.2s ease;
+}
+
+.editors-ellipsis:hover {
+    color: #764ba2;
+}
+
+.editors-popup {
+    position: fixed;
+    background: white;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+    min-width: 250px;
+    max-width: 350px;
+    z-index: 1001;
+}
+
+.editors-popup-content {
+    padding: 0;
+}
+
+.editors-popup-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem;
+    border-bottom: 1px solid #e2e8f0;
+    background: #f8fafc;
+    border-radius: 8px 8px 0 0;
+}
+
+.editors-popup-header h4 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+    color: #2d3748;
+}
+
+.close-popup {
+    background: none;
+    border: none;
+    font-size: 1.2rem;
+    cursor: pointer;
+    color: #718096;
+    transition: color 0.2s ease;
+    padding: 0;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.close-popup:hover {
+    color: #2d3748;
+}
+
+.editors-list {
+    padding: 0.5rem 0;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.editor-item {
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid #f1f5f9;
+    transition: background-color 0.2s ease;
+}
+
+.editor-item:last-child {
+    border-bottom: none;
+}
+
+.editor-item:hover {
+    background-color: #f8fafc;
+}
+
+.editor-item .clickable-username {
+    font-weight: 500;
+    color: #667eea;
+}
+
+.edit-date {
+    display: block;
+    font-size: 0.8rem;
+    color: #718096;
+    margin-top: 0.25rem;
+}
+
+/* Responsive adjustments for editors popup */
+@media (max-width: 768px) {
+    .editors-popup {
+        min-width: 200px;
+        max-width: 280px;
+    }
+    
+    .editors-popup-header {
+        padding: 0.75rem;
+    }
+    
+    .editor-item {
+        padding: 0.5rem 0.75rem;
+    }
+    
+    .edit-date {
+        font-size: 0.75rem;
+    }
 } 

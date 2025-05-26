@@ -549,10 +549,72 @@ function parseAndCleanTags(tagsInput) {
   return cleanedTags;
 }
 
+// Helper function to record edit history
+function recordEditHistory(targetType, targetId, editorId, actionType, oldValue = null, newValue = null) {
+  return new Promise((resolve, reject) => {
+    const oldValueStr = oldValue ? JSON.stringify(oldValue) : null;
+    const newValueStr = newValue ? JSON.stringify(newValue) : null;
+    
+    db.run(
+      'INSERT INTO edit_history (target_type, target_id, editor_id, action_type, old_value, new_value) VALUES (?, ?, ?, ?, ?, ?)',
+      [targetType, targetId, editorId, actionType, oldValueStr, newValueStr],
+      function(err) {
+        if (err) {
+          console.error('Error recording edit history:', err);
+          reject(err);
+        } else {
+          resolve(this.lastID);
+        }
+      }
+    );
+  });
+}
+
 // --- Topic Endpoints ---
 // List all topics
 app.get('/api/topics', (req, res) => {
   db.all('SELECT t.*, u.username as creator_username FROM topics t LEFT JOIN users u ON t.creator_id = u.id ORDER BY t.created_at DESC', [], (err, rows) => {
+    if (err) return res.status(500).json({ error: 'Database error.' });
+    res.json(rows);
+  });
+});
+
+// Get edit history for a topic or object
+app.get('/api/edit-history/:targetType/:targetId', (req, res) => {
+  const { targetType, targetId } = req.params;
+  
+  if (!['topic', 'object'].includes(targetType)) {
+    return res.status(400).json({ error: 'Invalid target type. Must be "topic" or "object".' });
+  }
+  
+  db.all(`
+    SELECT eh.*, u.username as editor_username 
+    FROM edit_history eh 
+    LEFT JOIN users u ON eh.editor_id = u.id 
+    WHERE eh.target_type = ? AND eh.target_id = ? 
+    ORDER BY eh.created_at ASC
+  `, [targetType, targetId], (err, rows) => {
+    if (err) return res.status(500).json({ error: 'Database error.' });
+    res.json(rows);
+  });
+});
+
+// Get unique editors for a topic or object
+app.get('/api/editors/:targetType/:targetId', (req, res) => {
+  const { targetType, targetId } = req.params;
+  
+  if (!['topic', 'object'].includes(targetType)) {
+    return res.status(400).json({ error: 'Invalid target type. Must be "topic" or "object".' });
+  }
+  
+  db.all(`
+    SELECT DISTINCT u.id, u.username, MIN(eh.created_at) as first_edit, MAX(eh.created_at) as last_edit
+    FROM edit_history eh 
+    LEFT JOIN users u ON eh.editor_id = u.id 
+    WHERE eh.target_type = ? AND eh.target_id = ? 
+    GROUP BY u.id, u.username
+    ORDER BY first_edit ASC
+  `, [targetType, targetId], (err, rows) => {
     if (err) return res.status(500).json({ error: 'Database error.' });
     res.json(rows);
   });
@@ -585,9 +647,16 @@ app.post('/api/topics', authenticateToken, validateContent, (req, res) => {
       });
     }
     
-    db.run('INSERT INTO topics (name, creator_id) VALUES (?, ?)', [name, req.user.id], function(err) {
+    db.run('INSERT INTO topics (name, creator_id) VALUES (?, ?)', [name, req.user.id], async function(err) {
     if (err) return res.status(500).json({ error: 'Database error.' });
     const topicId = this.lastID;
+    
+    // Record creation in edit history
+    try {
+      await recordEditHistory('topic', topicId, req.user.id, 'create', null, { name, tags: cleanedTags });
+    } catch (historyErr) {
+      console.error('Failed to record edit history:', historyErr);
+    }
     
     // Add tags if provided
     if (cleanedTags.length > 0) {
@@ -658,49 +727,65 @@ app.put('/api/topics/:id', authenticateToken, validateContent, (req, res) => {
     performTopicEdit();
   }
   
-  function performTopicEdit() {
-    db.get('SELECT * FROM topics WHERE id = ?', [topicId], (err, topic) => {
+  async function performTopicEdit() {
+    db.get('SELECT * FROM topics WHERE id = ?', [topicId], async (err, topic) => {
       if (err || !topic) return res.status(404).json({ error: 'Topic not found.' });
       if (topic.creator_id !== req.user.id && !req.user.isAdmin) return res.status(403).json({ error: 'Not allowed.' });
     
-    db.run('UPDATE topics SET name = ? WHERE id = ?', [name, topicId], function(err) {
-      if (err) return res.status(500).json({ error: 'Database error.' });
-      
-      // Update tags if provided
-      if (tags !== undefined) {
-        // Remove old tags
-        db.run('DELETE FROM topic_tags WHERE topic_id = ?', [topicId], (err) => {
+      // Get current tags for comparison
+      db.all('SELECT t.name FROM tags t JOIN topic_tags tt ON t.id = tt.tag_id WHERE tt.topic_id = ?', [topicId], async (err, currentTagRows) => {
+        if (err) return res.status(500).json({ error: 'Database error.' });
+        
+        const currentTags = currentTagRows.map(row => row.name);
+        const oldValue = { name: topic.name, tags: currentTags };
+        const newValue = { name, tags: cleanedTags };
+        
+        // Record edit in history
+        try {
+          await recordEditHistory('topic', topicId, req.user.id, 'edit', oldValue, newValue);
+        } catch (historyErr) {
+          console.error('Failed to record edit history:', historyErr);
+        }
+        
+        db.run('UPDATE topics SET name = ? WHERE id = ?', [name, topicId], function(err) {
           if (err) return res.status(500).json({ error: 'Database error.' });
           
-          // Insert new tags (create if not exist)
-          if (cleanedTags.length > 0) {
-            const insertTags = cleanedTags.map(tagName => {
-              return new Promise((resolve, reject) => {
-                db.run('INSERT OR IGNORE INTO tags (name) VALUES (?)', [tagName], function(err) {
-                  if (err) return reject(err);
-                  db.get('SELECT id FROM tags WHERE name = ?', [tagName], (err, tag) => {
-                    if (err) return reject(err);
-                    db.run('INSERT OR IGNORE INTO topic_tags (topic_id, tag_id) VALUES (?, ?)', [topicId, tag.id], function(err) {
+          // Update tags if provided
+          if (tags !== undefined) {
+            // Remove old tags
+            db.run('DELETE FROM topic_tags WHERE topic_id = ?', [topicId], (err) => {
+              if (err) return res.status(500).json({ error: 'Database error.' });
+              
+              // Insert new tags (create if not exist)
+              if (cleanedTags.length > 0) {
+                const insertTags = cleanedTags.map(tagName => {
+                  return new Promise((resolve, reject) => {
+                    db.run('INSERT OR IGNORE INTO tags (name) VALUES (?)', [tagName], function(err) {
                       if (err) return reject(err);
-                      resolve();
+                      db.get('SELECT id FROM tags WHERE name = ?', [tagName], (err, tag) => {
+                        if (err) return reject(err);
+                        db.run('INSERT OR IGNORE INTO topic_tags (topic_id, tag_id) VALUES (?, ?)', [topicId, tag.id], function(err) {
+                          if (err) return reject(err);
+                          resolve();
+                        });
+                      });
                     });
                   });
                 });
-              });
+                
+                Promise.all(insertTags)
+                  .then(() => res.json({ success: true }))
+                  .catch(() => res.status(500).json({ error: 'Database error.' }));
+              } else {
+                res.json({ success: true });
+              }
             });
-            
-            Promise.all(insertTags)
-              .then(() => res.json({ success: true }))
-              .catch(() => res.status(500).json({ error: 'Database error.' }));
           } else {
             res.json({ success: true });
           }
         });
-      } else {
-        res.json({ success: true });
-      }
+      });
     });
-  });
   }
 });
 // Delete a topic (only creator or admin)
@@ -744,9 +829,16 @@ app.post('/api/topics/:topicId/objects', authenticateToken, validateContent, (re
       });
     }
   
-  db.run('INSERT INTO objects (topic_id, name, creator_id) VALUES (?, ?, ?)', [topicId, name, req.user.id], function(err) {
+  db.run('INSERT INTO objects (topic_id, name, creator_id) VALUES (?, ?, ?)', [topicId, name, req.user.id], async function(err) {
     if (err) return res.status(500).json({ error: 'Database error.' });
     const objectId = this.lastID;
+    
+    // Record creation in edit history
+    try {
+      await recordEditHistory('object', objectId, req.user.id, 'create', null, { name, topic_id: topicId });
+    } catch (historyErr) {
+      console.error('Failed to record edit history:', historyErr);
+    }
     
     // Inherit tags from topic
     db.all('SELECT tag_id FROM topic_tags WHERE topic_id = ?', [topicId], (err, topicTags) => {
@@ -805,15 +897,26 @@ app.put('/api/objects/:id', authenticateToken, validateContent, (req, res) => {
     performObjectEdit();
   }
   
-  function performObjectEdit() {
-    db.get('SELECT * FROM objects WHERE id = ?', [objectId], (err, object) => {
+  async function performObjectEdit() {
+    db.get('SELECT * FROM objects WHERE id = ?', [objectId], async (err, object) => {
       if (err || !object) return res.status(404).json({ error: 'Object not found.' });
       if (object.creator_id !== req.user.id && !req.user.isAdmin) return res.status(403).json({ error: 'Not allowed.' });
-    db.run('UPDATE objects SET name = ? WHERE id = ?', [name, objectId], function(err) {
-      if (err) return res.status(500).json({ error: 'Database error.' });
-      res.json({ success: true });
+      
+      const oldValue = { name: object.name, topic_id: object.topic_id };
+      const newValue = { name, topic_id: object.topic_id };
+      
+      // Record edit in history
+      try {
+        await recordEditHistory('object', objectId, req.user.id, 'edit', oldValue, newValue);
+      } catch (historyErr) {
+        console.error('Failed to record edit history:', historyErr);
+      }
+      
+      db.run('UPDATE objects SET name = ? WHERE id = ?', [name, objectId], function(err) {
+        if (err) return res.status(500).json({ error: 'Database error.' });
+        res.json({ success: true });
+      });
     });
-  });
   }
 });
 // Delete an object (only creator or admin)

@@ -178,6 +178,19 @@ const init = () => {
       }
     });
 
+    // Edit history table to track who has edited topics and objects
+    db.run(`CREATE TABLE IF NOT EXISTS edit_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      target_type TEXT NOT NULL, -- 'topic' or 'object'
+      target_id INTEGER NOT NULL,
+      editor_id INTEGER NOT NULL,
+      action_type TEXT NOT NULL, -- 'create', 'edit', 'delete'
+      old_value TEXT, -- JSON string of old values
+      new_value TEXT, -- JSON string of new values
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (editor_id) REFERENCES users(id)
+    )`);
+
     // Clean up expired pending registrations on startup
     db.run('DELETE FROM pending_registrations WHERE expires_at <= datetime("now")', (err) => {
       if (err) {
