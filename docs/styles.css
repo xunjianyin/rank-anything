@@ -369,8 +369,23 @@ body {
 
 .topic-header-content {
     display: flex;
-    align-items: center;
-    gap: 1rem;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+}
+
+.topic-header-content h2 {
+    margin: 0;
+}
+
+.topic-tags-display {
+    margin-bottom: 0.5rem;
+}
+
+.topic-tags-display .tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
 }
 
 .topic-actions,

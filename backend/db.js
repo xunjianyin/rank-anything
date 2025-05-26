@@ -46,6 +46,14 @@ const init = () => {
       FOREIGN KEY (tag_id) REFERENCES tags(id)
     )`);
 
+    db.run(`CREATE TABLE IF NOT EXISTS topic_tags (
+      topic_id INTEGER,
+      tag_id INTEGER,
+      PRIMARY KEY (topic_id, tag_id),
+      FOREIGN KEY (topic_id) REFERENCES topics(id),
+      FOREIGN KEY (tag_id) REFERENCES tags(id)
+    )`);
+
     db.run(`CREATE TABLE IF NOT EXISTS ratings (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       object_id INTEGER NOT NULL,

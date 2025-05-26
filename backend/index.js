@@ -84,26 +84,90 @@ app.get('/api/topics', (req, res) => {
 });
 // Create a topic
 app.post('/api/topics', authenticateToken, (req, res) => {
-  const { name } = req.body;
+  const { name, tags } = req.body;
   if (!name) return res.status(400).json({ error: 'Name is required.' });
+  
   db.run('INSERT INTO topics (name, creator_id) VALUES (?, ?)', [name, req.user.id], function(err) {
     if (err) return res.status(500).json({ error: 'Database error.' });
-    db.get('SELECT * FROM topics WHERE id = ?', [this.lastID], (err, topic) => {
-      if (err) return res.status(500).json({ error: 'Database error.' });
-      res.json(topic);
-    });
+    const topicId = this.lastID;
+    
+    // Add tags if provided
+    if (tags && Array.isArray(tags) && tags.length > 0) {
+      const insertTags = tags.map(tagName => {
+        return new Promise((resolve, reject) => {
+          db.run('INSERT OR IGNORE INTO tags (name) VALUES (?)', [tagName], function(err) {
+            if (err) return reject(err);
+            db.get('SELECT id FROM tags WHERE name = ?', [tagName], (err, tag) => {
+              if (err) return reject(err);
+              db.run('INSERT OR IGNORE INTO topic_tags (topic_id, tag_id) VALUES (?, ?)', [topicId, tag.id], function(err) {
+                if (err) return reject(err);
+                resolve();
+              });
+            });
+          });
+        });
+      });
+      
+      Promise.all(insertTags)
+        .then(() => {
+          db.get('SELECT * FROM topics WHERE id = ?', [topicId], (err, topic) => {
+            if (err) return res.status(500).json({ error: 'Database error.' });
+            res.json(topic);
+          });
+        })
+        .catch(() => res.status(500).json({ error: 'Database error.' }));
+    } else {
+      db.get('SELECT * FROM topics WHERE id = ?', [topicId], (err, topic) => {
+        if (err) return res.status(500).json({ error: 'Database error.' });
+        res.json(topic);
+      });
+    }
   });
 });
 // Edit a topic (only creator or admin)
 app.put('/api/topics/:id', authenticateToken, (req, res) => {
-  const { name } = req.body;
+  const { name, tags } = req.body;
   const topicId = req.params.id;
   db.get('SELECT * FROM topics WHERE id = ?', [topicId], (err, topic) => {
     if (err || !topic) return res.status(404).json({ error: 'Topic not found.' });
     if (topic.creator_id !== req.user.id && !req.user.isAdmin) return res.status(403).json({ error: 'Not allowed.' });
+    
     db.run('UPDATE topics SET name = ? WHERE id = ?', [name, topicId], function(err) {
       if (err) return res.status(500).json({ error: 'Database error.' });
-      res.json({ success: true });
+      
+      // Update tags if provided
+      if (tags && Array.isArray(tags)) {
+        // Remove old tags
+        db.run('DELETE FROM topic_tags WHERE topic_id = ?', [topicId], (err) => {
+          if (err) return res.status(500).json({ error: 'Database error.' });
+          
+          // Insert new tags (create if not exist)
+          if (tags.length > 0) {
+            const insertTags = tags.map(tagName => {
+              return new Promise((resolve, reject) => {
+                db.run('INSERT OR IGNORE INTO tags (name) VALUES (?)', [tagName], function(err) {
+                  if (err) return reject(err);
+                  db.get('SELECT id FROM tags WHERE name = ?', [tagName], (err, tag) => {
+                    if (err) return reject(err);
+                    db.run('INSERT OR IGNORE INTO topic_tags (topic_id, tag_id) VALUES (?, ?)', [topicId, tag.id], function(err) {
+                      if (err) return reject(err);
+                      resolve();
+                    });
+                  });
+                });
+              });
+            });
+            
+            Promise.all(insertTags)
+              .then(() => res.json({ success: true }))
+              .catch(() => res.status(500).json({ error: 'Database error.' }));
+          } else {
+            res.json({ success: true });
+          }
+        });
+      } else {
+        res.json({ success: true });
+      }
     });
   });
 });
@@ -134,11 +198,39 @@ app.post('/api/topics/:topicId/objects', authenticateToken, (req, res) => {
   const topicId = req.params.topicId;
   const { name } = req.body;
   if (!name) return res.status(400).json({ error: 'Name is required.' });
+  
   db.run('INSERT INTO objects (topic_id, name, creator_id) VALUES (?, ?, ?)', [topicId, name, req.user.id], function(err) {
     if (err) return res.status(500).json({ error: 'Database error.' });
-    db.get('SELECT * FROM objects WHERE id = ?', [this.lastID], (err, object) => {
+    const objectId = this.lastID;
+    
+    // Inherit tags from topic
+    db.all('SELECT tag_id FROM topic_tags WHERE topic_id = ?', [topicId], (err, topicTags) => {
       if (err) return res.status(500).json({ error: 'Database error.' });
-      res.json(object);
+      
+      if (topicTags.length > 0) {
+        const inheritTags = topicTags.map(topicTag => {
+          return new Promise((resolve, reject) => {
+            db.run('INSERT OR IGNORE INTO object_tags (object_id, tag_id) VALUES (?, ?)', [objectId, topicTag.tag_id], function(err) {
+              if (err) return reject(err);
+              resolve();
+            });
+          });
+        });
+        
+        Promise.all(inheritTags)
+          .then(() => {
+            db.get('SELECT * FROM objects WHERE id = ?', [objectId], (err, object) => {
+              if (err) return res.status(500).json({ error: 'Database error.' });
+              res.json(object);
+            });
+          })
+          .catch(() => res.status(500).json({ error: 'Database error.' }));
+      } else {
+        db.get('SELECT * FROM objects WHERE id = ?', [objectId], (err, object) => {
+          if (err) return res.status(500).json({ error: 'Database error.' });
+          res.json(object);
+        });
+      }
     });
   });
 });
@@ -238,6 +330,54 @@ app.get('/api/tags/:tagName/objects', (req, res) => {
       if (err) return res.status(500).json({ error: 'Database error.' });
       res.json(rows);
     });
+  });
+});
+
+// --- Topic Tag Endpoints ---
+// Assign tags to a topic (replace all tags)
+app.post('/api/topics/:topicId/tags', authenticateToken, (req, res) => {
+  const topicId = req.params.topicId;
+  const { tags } = req.body; // array of tag names
+  if (!Array.isArray(tags)) return res.status(400).json({ error: 'Tags must be an array.' });
+  
+  // Only creator or admin can edit tags
+  db.get('SELECT * FROM topics WHERE id = ?', [topicId], (err, topic) => {
+    if (err || !topic) return res.status(404).json({ error: 'Topic not found.' });
+    if (topic.creator_id !== req.user.id && !req.user.isAdmin) return res.status(403).json({ error: 'Not allowed.' });
+    
+    // Remove old tags
+    db.run('DELETE FROM topic_tags WHERE topic_id = ?', [topicId], (err) => {
+      if (err) return res.status(500).json({ error: 'Database error.' });
+      
+      // Insert new tags (create if not exist)
+      const insertTags = tags.map(tagName => {
+        return new Promise((resolve, reject) => {
+          db.run('INSERT OR IGNORE INTO tags (name) VALUES (?)', [tagName], function(err) {
+            if (err) return reject(err);
+            db.get('SELECT id FROM tags WHERE name = ?', [tagName], (err, tag) => {
+              if (err) return reject(err);
+              db.run('INSERT OR IGNORE INTO topic_tags (topic_id, tag_id) VALUES (?, ?)', [topicId, tag.id], function(err) {
+                if (err) return reject(err);
+                resolve();
+              });
+            });
+          });
+        });
+      });
+      
+      Promise.all(insertTags)
+        .then(() => res.json({ success: true }))
+        .catch(() => res.status(500).json({ error: 'Database error.' }));
+    });
+  });
+});
+
+// List tags for a topic
+app.get('/api/topics/:topicId/tags', (req, res) => {
+  const topicId = req.params.topicId;
+  db.all('SELECT t.* FROM tags t JOIN topic_tags tt ON t.id = tt.tag_id WHERE tt.topic_id = ?', [topicId], (err, rows) => {
+    if (err) return res.status(500).json({ error: 'Database error.' });
+    res.json(rows);
   });
 });
 

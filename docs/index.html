@@ -172,6 +172,7 @@
                     <div class="add-topic-form" id="add-topic-form" style="display: none;">
                         <form onsubmit="addTopic(event)">
                             <input type="text" id="topic-name" placeholder="Enter topic name" required>
+                            <input type="text" id="topic-tags" placeholder="Enter tags (comma-separated)">
                             <div class="form-actions">
                                 <button type="submit" class="btn btn-primary">Add Topic</button>
                                 <button type="button" class="btn btn-secondary" onclick="hideAddTopicForm()">Cancel</button>
@@ -189,6 +190,7 @@
                     <div class="page-header">
                         <div class="topic-header-content">
                             <h2 id="topic-title">Topic Objects</h2>
+                            <div class="topic-tags-display" id="topic-tags-display"></div>
                             <div class="topic-actions">
                                 <button class="btn btn-secondary" id="edit-topic-btn" onclick="editTopic()" style="display: none;">
                                     <i class="fas fa-edit"></i>

@@ -506,6 +506,9 @@ async function showTopicPage(topicId) {
         
         document.getElementById('topic-title').textContent = topic.name;
         
+        // Display topic tags
+        await renderTopicTags();
+        
         // Show edit/delete buttons if user owns the topic
         updateTopicActions(topic);
         
@@ -635,9 +638,19 @@ function updateTopicActions(topic) {
             proposeEditBtn.textContent = 'Propose Edit';
             proposeEditBtn.onclick = async function() {
                 const newName = prompt('Enter new topic name:', topic.name);
-                if (!newName || newName.trim() === '' || newName.trim() === topic.name) return;
+                if (!newName || newName.trim() === '') return;
+                
+                const currentTags = await fetchTopicTags(topic.id);
+                const currentTagNames = currentTags.map(tag => tag.name);
+                const newTagsStr = prompt('Enter tags (comma-separated):', currentTagNames.join(', '));
+                if (newTagsStr === null) return;
+                
+                const newTags = newTagsStr ? newTagsStr.split(',').map(tag => tag.trim()).filter(tag => tag) : [];
+                
+                if (newName.trim() === topic.name && JSON.stringify(newTags) === JSON.stringify(currentTagNames)) return;
+                
                 try {
-                    await createProposal('edit', 'topic', topic.id, newName.trim(), 'User proposed topic name change');
+                    await createProposal('edit', 'topic', topic.id, JSON.stringify({ name: newName.trim(), tags: newTags }), 'User proposed topic edit');
                     showNotification('Edit proposal submitted for community voting');
                     updateProposalCount();
                 } catch (error) {
@@ -1001,7 +1014,7 @@ async function fetchTopics() {
     return await res.json();
 }
 
-async function createTopic(name) {
+async function createTopic(name, tags) {
     const token = getAuthToken();
     const res = await fetch(BACKEND_URL + '/api/topics', {
         method: 'POST',
@@ -1009,13 +1022,13 @@ async function createTopic(name) {
             'Content-Type': 'application/json',
             'Authorization': 'Bearer ' + token
         },
-        body: JSON.stringify({ name })
+        body: JSON.stringify({ name, tags })
     });
     if (!res.ok) throw new Error('Failed to create topic');
     return await res.json();
 }
 
-async function updateTopic(id, name) {
+async function updateTopic(id, name, tags) {
     const token = getAuthToken();
     const res = await fetch(BACKEND_URL + '/api/topics/' + id, {
         method: 'PUT',
@@ -1023,7 +1036,7 @@ async function updateTopic(id, name) {
             'Content-Type': 'application/json',
             'Authorization': 'Bearer ' + token
         },
-        body: JSON.stringify({ name })
+        body: JSON.stringify({ name, tags })
     });
     if (!res.ok) throw new Error('Failed to update topic');
     return await res.json();
@@ -1079,9 +1092,13 @@ async function addTopic(event) {
         return;
     }
     const topicName = document.getElementById('topic-name').value.trim();
+    const topicTagsStr = document.getElementById('topic-tags').value.trim();
     if (!topicName) return;
+    
+    const tags = topicTagsStr ? topicTagsStr.split(',').map(tag => tag.trim()).filter(tag => tag) : [];
+    
     try {
-        await createTopic(topicName);
+        await createTopic(topicName, tags);
         renderTopics();
         hideAddTopicForm();
         showNotification('Topic created!');
@@ -1106,6 +1123,12 @@ async function fetchObject(objectId) {
 async function fetchTopic(topicId) {
     const topics = await fetchTopics();
     return topics.find(topic => topic.id == topicId);
+}
+
+async function fetchTopicTags(topicId) {
+    const res = await fetch(BACKEND_URL + `/api/topics/${topicId}/tags`);
+    if (!res.ok) throw new Error('Failed to fetch topic tags');
+    return await res.json();
 }
 
 async function createObject(topicId, name) {
@@ -2267,6 +2290,24 @@ async function renderObjectTags() {
     }
 }
 
+async function renderTopicTags() {
+    const tagsContainer = document.getElementById('topic-tags-display');
+    try {
+        const tags = await fetchTopicTags(currentTopicId);
+        if (tags.length > 0) {
+            tagsContainer.innerHTML = `
+                <div class="tags">
+                    ${tags.map(tag => `<span class="tag clickable" onclick="searchByTag('${escapeHtml(tag.name)}', event)">${escapeHtml(tag.name)}</span>`).join('')}
+                </div>
+            `;
+        } else {
+            tagsContainer.innerHTML = '';
+        }
+    } catch (e) {
+        tagsContainer.innerHTML = '<div class="error">Failed to load topic tags.</div>';
+    }
+}
+
 // --- Moderation Proposals with Backend API ---
 async function fetchProposals(status = '') {
     const token = getAuthToken();
@@ -2403,10 +2444,54 @@ window.executeProposalUI = async function(proposalId) {
     }
 }
 
+// Topic editing functions
+async function editTopic() {
+    if (!currentUser || !currentTopicId) return;
+    
+    try {
+        const topic = await fetchTopic(currentTopicId);
+        const tags = await fetchTopicTags(currentTopicId);
+        
+        const newName = prompt('Enter new topic name:', topic.name);
+        if (!newName || newName.trim() === '') return;
+        
+        const currentTagNames = tags.map(tag => tag.name);
+        const newTagsStr = prompt('Enter tags (comma-separated):', currentTagNames.join(', '));
+        if (newTagsStr === null) return;
+        
+        const newTags = newTagsStr ? newTagsStr.split(',').map(tag => tag.trim()).filter(tag => tag) : [];
+        
+        await updateTopic(currentTopicId, newName.trim(), newTags);
+        
+        // Refresh the page
+        await showTopicPage(currentTopicId);
+        showNotification('Topic updated successfully!');
+    } catch (error) {
+        alert('Failed to update topic: ' + error.message);
+    }
+}
+
+async function deleteTopicUI() {
+    if (!currentUser || !currentTopicId) return;
+    
+    try {
+        const topic = await fetchTopic(currentTopicId);
+        if (!confirm(`Are you sure you want to delete the topic "${topic.name}"? This will also delete all objects and ratings within it.`)) return;
+        
+        await deleteTopic(currentTopicId);
+        showHomePage();
+        showNotification('Topic deleted successfully!');
+    } catch (error) {
+        alert('Failed to delete topic: ' + error.message);
+    }
+}
+
 // Ensure UI functions are globally available for HTML onclick
 window.showAddTopicForm = showAddTopicForm;
 window.hideAddTopicForm = hideAddTopicForm;
 window.addTopic = addTopic;
+window.editTopic = editTopic;
+window.deleteTopic = deleteTopicUI;
 window.showAddObjectForm = showAddObjectForm;
 window.hideAddObjectForm = hideAddObjectForm;
 window.addObject = addObject;
@@ -2423,6 +2508,7 @@ function showAddTopicForm() {
 function hideAddTopicForm() {
     document.getElementById('add-topic-form').style.display = 'none';
     document.getElementById('topic-name').value = '';
+    document.getElementById('topic-tags').value = '';
 }
 function showAddObjectForm() {
     document.getElementById('add-object-form').style.display = 'block';
