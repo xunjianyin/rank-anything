@@ -1187,7 +1187,18 @@ async function renderObjects() {
             `;
             return;
         }
-        grid.innerHTML = objects.map(object => {
+        // Fetch tags for each object and render
+        const objectsWithTags = await Promise.all(objects.map(async (object) => {
+            try {
+                const tags = await fetchObjectTags(object.id);
+                return { ...object, tags: tags.map(tag => tag.name) };
+            } catch (error) {
+                console.error(`Failed to fetch tags for object ${object.id}:`, error);
+                return { ...object, tags: [] };
+            }
+        }));
+        
+        grid.innerHTML = objectsWithTags.map(object => {
             return `
                 <div class="object-card" onclick="showObjectPage('${object.id}')">
                     <div class="card-owner">by ${escapeHtml(object.creator_username || '')}</div>
@@ -1195,6 +1206,11 @@ async function renderObjects() {
                     <div class="rating">
                         <span class="rating-text">Created: ${formatDate(object.created_at)}</span>
                     </div>
+                    ${object.tags.length > 0 ? `
+                        <div class="tags">
+                            ${object.tags.map(tag => `<span class="tag clickable" onclick="searchByTag('${escapeHtml(tag)}', event)">${escapeHtml(tag)}</span>`).join('')}
+                        </div>
+                    ` : ''}
                 </div>
             `;
         }).join('');
@@ -1211,9 +1227,26 @@ async function addObject(event) {
         return;
     }
     const objectName = document.getElementById('object-name').value.trim();
+    const objectTagsStr = document.getElementById('object-tags').value.trim();
     if (!objectName) return;
+    
     try {
-        await createObject(currentTopicId, objectName);
+        const newObject = await createObject(currentTopicId, objectName);
+        
+        // Add additional tags if specified (beyond inherited topic tags)
+        if (objectTagsStr) {
+            const additionalTags = objectTagsStr.split(',').map(tag => tag.trim()).filter(tag => tag);
+            if (additionalTags.length > 0) {
+                // Get current tags (inherited from topic)
+                const currentTags = await fetchObjectTags(newObject.id);
+                const currentTagNames = currentTags.map(tag => tag.name);
+                
+                // Combine current tags with additional tags (remove duplicates)
+                const allTags = [...new Set([...currentTagNames, ...additionalTags])];
+                await assignTagsToObject(newObject.id, allTags);
+            }
+        }
+        
         renderObjects();
         hideAddObjectForm();
         showNotification('Object created!');
@@ -1831,7 +1864,12 @@ function renderUserDailyChart(dailyStats) {
         return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     });
     
-    const ctx = document.getElementById('user-daily-chart').getContext('2d');
+    const chartElement = document.getElementById('user-daily-chart');
+    if (!chartElement) {
+        console.error('Chart canvas element not found');
+        return;
+    }
+    const ctx = chartElement.getContext('2d');
     
     // Destroy existing chart if it exists
     if (window.userDailyChart) {
@@ -2555,6 +2593,62 @@ window.executeProposalUI = async function(proposalId) {
     }
 }
 
+// Object editing functions
+async function editObject() {
+    if (!currentUser || !currentObjectId) return;
+    
+    try {
+        const object = await fetchObject(currentObjectId);
+        if (!object) {
+            alert('Object not found');
+            return;
+        }
+        
+        const newName = prompt('Enter new object name:', object.name);
+        if (!newName || newName.trim() === '') return;
+        
+        const currentTags = await fetchObjectTags(currentObjectId);
+        const currentTagNames = currentTags.map(tag => tag.name);
+        const newTagsStr = prompt('Enter tags (comma-separated):', currentTagNames.join(', '));
+        if (newTagsStr === null) return;
+        
+        const newTags = newTagsStr ? newTagsStr.split(',').map(tag => tag.trim()).filter(tag => tag) : [];
+        
+        if (newName.trim() === object.name && JSON.stringify(newTags.sort()) === JSON.stringify(currentTagNames.sort())) {
+            return; // No changes
+        }
+        
+        await updateObject(currentObjectId, newName.trim());
+        if (newTags.length > 0 || currentTagNames.length > 0) {
+            await assignTagsToObject(currentObjectId, newTags);
+        }
+        showNotification('Object updated successfully');
+        await showObjectPage(currentObjectId); // Refresh the page
+    } catch (error) {
+        alert('Failed to update object: ' + error.message);
+    }
+}
+
+async function deleteObjectUI() {
+    if (!currentUser || !currentObjectId) return;
+    
+    try {
+        const object = await fetchObject(currentObjectId);
+        if (!object) {
+            alert('Object not found');
+            return;
+        }
+        
+        if (!confirm(`Are you sure you want to delete the object "${object.name}"? This will also delete all ratings for this object.`)) return;
+        
+        await deleteObject(currentObjectId);
+        await showTopicPage(currentTopicId); // Go back to topic page
+        showNotification('Object deleted successfully!');
+    } catch (error) {
+        alert('Failed to delete object: ' + error.message);
+    }
+}
+
 // Topic editing functions
 async function editTopic() {
     if (!currentUser || !currentTopicId) return;
@@ -2606,6 +2700,8 @@ window.deleteTopic = deleteTopicUI;
 window.showAddObjectForm = showAddObjectForm;
 window.hideAddObjectForm = hideAddObjectForm;
 window.addObject = addObject;
+window.editObject = editObject;
+window.deleteObject = deleteObjectUI;
 window.showObjectStatsPage = showObjectStatsPage;
 window.showUserSpacePage = showUserSpacePage;
 window.updateUserInfo = updateUserInfo;
