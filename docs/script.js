@@ -1862,15 +1862,22 @@ async function adminVetoProposal(proposalId) {
 // Add global for selected time range
 let objectStatsSelectedRange = null;
 let objectStatsGranularity = 'day';
-function showObjectStatsPage() {
+async function showObjectStatsPage() {
     hideAllPages();
     document.getElementById('object-stats-page').classList.add('active');
-    renderObjectStatsPage();
+    await renderObjectStatsPage();
 }
-function renderObjectStatsPage() {
+async function renderObjectStatsPage() {
     const container = document.getElementById('object-stats-content');
-    const object = data.objects[currentTopicId].find(o => o.id === currentObjectId);
-    const ratings = data.ratings[currentTopicId][currentObjectId] || [];
+    
+    try {
+        const object = await fetchObject(currentObjectId);
+        const ratings = await fetchRatings(currentObjectId);
+        
+        if (!object) {
+            container.innerHTML = '<div class="error">Object not found</div>';
+            return;
+        }
     // Chart.js loader
     if (!window.Chart) {
         const script = document.createElement('script');
@@ -1939,9 +1946,9 @@ function renderObjectStatsPage() {
     }
     // Bucket ratings
     ratings.forEach(r => {
-        const key = formatDate(r.createdAt, granularity);
+        const key = formatDate(r.created_at, granularity);
         if (!timeBuckets[key]) timeBuckets[key] = [];
-        timeBuckets[key].push({rating: r.rating, createdAt: r.createdAt});
+        timeBuckets[key].push({rating: r.rating, createdAt: r.created_at});
     });
     // Sort keys chronologically
     const sortedKeys = Object.keys(timeBuckets).sort((a,b) => new Date(a) - new Date(b));
@@ -2017,7 +2024,7 @@ function renderObjectStatsPage() {
     if (objectStatsSelectedRange && objectStatsSelectedRange.length === 2) {
         const [minT, maxT] = objectStatsSelectedRange;
         filteredRatings = ratings.filter(r => {
-            const t = new Date(r.createdAt).getTime();
+            const t = new Date(r.created_at).getTime();
             return t >= minT && t <= maxT;
         });
     }
@@ -2042,6 +2049,11 @@ function renderObjectStatsPage() {
             scales: { x: { beginAtZero: true, precision:0 } }
         }
     });
+    
+    } catch (error) {
+        console.error('Error rendering object statistics:', error);
+        container.innerHTML = '<div class="error">Failed to load statistics: ' + error.message + '</div>';
+    }
 }
 
 function updateProposalCount() {
@@ -2202,6 +2214,7 @@ window.addTopic = addTopic;
 window.showAddObjectForm = showAddObjectForm;
 window.hideAddObjectForm = hideAddObjectForm;
 window.addObject = addObject;
+window.showObjectStatsPage = showObjectStatsPage;
 // Add more as needed for other UI functions referenced in HTML
 
 // UI functions for showing/hiding add topic/object forms
