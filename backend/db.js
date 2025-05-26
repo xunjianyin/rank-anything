@@ -11,6 +11,7 @@ const init = () => {
       username TEXT UNIQUE NOT NULL,
       email TEXT UNIQUE NOT NULL,
       password TEXT NOT NULL,
+      is_admin INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
 
@@ -79,6 +80,43 @@ const init = () => {
       FOREIGN KEY (proposal_id) REFERENCES moderation_proposals(id),
       FOREIGN KEY (user_id) REFERENCES users(id)
     )`);
+
+    // Add is_admin column if it doesn't exist (migration)
+    db.run(`ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0`, (err) => {
+      // Ignore error if column already exists
+    });
+
+    // Create default admin user if it doesn't exist
+    const bcrypt = require('bcryptjs');
+    const adminPassword = bcrypt.hashSync('202505262142', 10);
+    
+    db.get('SELECT * FROM users WHERE username = ?', ['Admin'], (err, user) => {
+      if (err) {
+        console.error('Error checking for admin user:', err);
+        return;
+      }
+      
+      if (!user) {
+        // Create admin user
+        db.run('INSERT INTO users (username, email, password, is_admin) VALUES (?, ?, ?, ?)', 
+          ['Admin', 'admin@system.local', adminPassword, 1], function(err) {
+            if (err) {
+              console.error('Error creating admin user:', err);
+            } else {
+              console.log('Default admin user created successfully');
+            }
+          });
+      } else if (!user.is_admin) {
+        // Update existing Admin user to be admin
+        db.run('UPDATE users SET is_admin = 1 WHERE username = ?', ['Admin'], (err) => {
+          if (err) {
+            console.error('Error updating admin user:', err);
+          } else {
+            console.log('Admin user updated to have admin privileges');
+          }
+        });
+      }
+    });
   });
 };
 

@@ -38,8 +38,8 @@ app.post('/api/register', (req, res) => {
     db.run('INSERT INTO users (username, email, password) VALUES (?, ?, ?)', [username, email, hash], function(err) {
       if (err) return res.status(500).json({ error: 'Database error.' });
       const userId = this.lastID;
-      const token = jwt.sign({ id: userId, username, email }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
-      res.json({ token, user: { id: userId, username, email } });
+      const token = jwt.sign({ id: userId, username, email, isAdmin: false }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+      res.json({ token, user: { id: userId, username, email, isAdmin: false } });
     });
   });
 });
@@ -57,8 +57,8 @@ app.post('/api/login', (req, res) => {
     if (!bcrypt.compareSync(password, user.password)) {
       return res.status(400).json({ error: 'Invalid email/username or password.' });
     }
-    const token = jwt.sign({ id: user.id, username: user.username, email: user.email }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
-    res.json({ token, user: { id: user.id, username: user.username, email: user.email } });
+    const token = jwt.sign({ id: user.id, username: user.username, email: user.email, isAdmin: !!user.is_admin }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+    res.json({ token, user: { id: user.id, username: user.username, email: user.email, isAdmin: !!user.is_admin } });
   });
 });
 
@@ -94,25 +94,25 @@ app.post('/api/topics', authenticateToken, (req, res) => {
     });
   });
 });
-// Edit a topic (only creator)
+// Edit a topic (only creator or admin)
 app.put('/api/topics/:id', authenticateToken, (req, res) => {
   const { name } = req.body;
   const topicId = req.params.id;
   db.get('SELECT * FROM topics WHERE id = ?', [topicId], (err, topic) => {
     if (err || !topic) return res.status(404).json({ error: 'Topic not found.' });
-    if (topic.creator_id !== req.user.id) return res.status(403).json({ error: 'Not allowed.' });
+    if (topic.creator_id !== req.user.id && !req.user.isAdmin) return res.status(403).json({ error: 'Not allowed.' });
     db.run('UPDATE topics SET name = ? WHERE id = ?', [name, topicId], function(err) {
       if (err) return res.status(500).json({ error: 'Database error.' });
       res.json({ success: true });
     });
   });
 });
-// Delete a topic (only creator)
+// Delete a topic (only creator or admin)
 app.delete('/api/topics/:id', authenticateToken, (req, res) => {
   const topicId = req.params.id;
   db.get('SELECT * FROM topics WHERE id = ?', [topicId], (err, topic) => {
     if (err || !topic) return res.status(404).json({ error: 'Topic not found.' });
-    if (topic.creator_id !== req.user.id) return res.status(403).json({ error: 'Not allowed.' });
+    if (topic.creator_id !== req.user.id && !req.user.isAdmin) return res.status(403).json({ error: 'Not allowed.' });
     db.run('DELETE FROM topics WHERE id = ?', [topicId], function(err) {
       if (err) return res.status(500).json({ error: 'Database error.' });
       res.json({ success: true });
@@ -142,25 +142,25 @@ app.post('/api/topics/:topicId/objects', authenticateToken, (req, res) => {
     });
   });
 });
-// Edit an object (only creator)
+// Edit an object (only creator or admin)
 app.put('/api/objects/:id', authenticateToken, (req, res) => {
   const { name } = req.body;
   const objectId = req.params.id;
   db.get('SELECT * FROM objects WHERE id = ?', [objectId], (err, object) => {
     if (err || !object) return res.status(404).json({ error: 'Object not found.' });
-    if (object.creator_id !== req.user.id) return res.status(403).json({ error: 'Not allowed.' });
+    if (object.creator_id !== req.user.id && !req.user.isAdmin) return res.status(403).json({ error: 'Not allowed.' });
     db.run('UPDATE objects SET name = ? WHERE id = ?', [name, objectId], function(err) {
       if (err) return res.status(500).json({ error: 'Database error.' });
       res.json({ success: true });
     });
   });
 });
-// Delete an object (only creator)
+// Delete an object (only creator or admin)
 app.delete('/api/objects/:id', authenticateToken, (req, res) => {
   const objectId = req.params.id;
   db.get('SELECT * FROM objects WHERE id = ?', [objectId], (err, object) => {
     if (err || !object) return res.status(404).json({ error: 'Object not found.' });
-    if (object.creator_id !== req.user.id) return res.status(403).json({ error: 'Not allowed.' });
+    if (object.creator_id !== req.user.id && !req.user.isAdmin) return res.status(403).json({ error: 'Not allowed.' });
     db.run('DELETE FROM objects WHERE id = ?', [objectId], function(err) {
       if (err) return res.status(500).json({ error: 'Database error.' });
       res.json({ success: true });
@@ -193,10 +193,10 @@ app.post('/api/objects/:objectId/tags', authenticateToken, (req, res) => {
   const objectId = req.params.objectId;
   const { tags } = req.body; // array of tag names
   if (!Array.isArray(tags)) return res.status(400).json({ error: 'Tags must be an array.' });
-  // Only creator can edit tags
+  // Only creator or admin can edit tags
   db.get('SELECT * FROM objects WHERE id = ?', [objectId], (err, object) => {
     if (err || !object) return res.status(404).json({ error: 'Object not found.' });
-    if (object.creator_id !== req.user.id) return res.status(403).json({ error: 'Not allowed.' });
+    if (object.creator_id !== req.user.id && !req.user.isAdmin) return res.status(403).json({ error: 'Not allowed.' });
     // Remove old tags
     db.run('DELETE FROM object_tags WHERE object_id = ?', [objectId], (err) => {
       if (err) return res.status(500).json({ error: 'Database error.' });
@@ -371,6 +371,97 @@ app.post('/api/moderation/proposals/:id/execute', authenticateToken, (req, res) 
         });
       });
     });
+  });
+});
+
+// --- Admin Endpoints ---
+// List all users (admin only)
+app.get('/api/admin/users', authenticateToken, (req, res) => {
+  if (!req.user.isAdmin) return res.status(403).json({ error: 'Admin access required.' });
+  db.all('SELECT id, username, email, is_admin, created_at FROM users ORDER BY created_at DESC', [], (err, rows) => {
+    if (err) return res.status(500).json({ error: 'Database error.' });
+    res.json(rows);
+  });
+});
+
+// Update user (admin only)
+app.put('/api/admin/users/:id', authenticateToken, (req, res) => {
+  if (!req.user.isAdmin) return res.status(403).json({ error: 'Admin access required.' });
+  const { username, email, is_admin } = req.body;
+  const userId = req.params.id;
+  
+  db.run('UPDATE users SET username = ?, email = ?, is_admin = ? WHERE id = ?', 
+    [username, email, is_admin ? 1 : 0, userId], function(err) {
+      if (err) return res.status(500).json({ error: 'Database error.' });
+      res.json({ success: true });
+    });
+});
+
+// Delete user (admin only)
+app.delete('/api/admin/users/:id', authenticateToken, (req, res) => {
+  if (!req.user.isAdmin) return res.status(403).json({ error: 'Admin access required.' });
+  const userId = req.params.id;
+  
+  // Don't allow deleting yourself
+  if (parseInt(userId) === req.user.id) {
+    return res.status(400).json({ error: 'Cannot delete your own account.' });
+  }
+  
+  db.run('DELETE FROM users WHERE id = ?', [userId], function(err) {
+    if (err) return res.status(500).json({ error: 'Database error.' });
+    res.json({ success: true });
+  });
+});
+
+// Admin approve/reject proposal directly
+app.post('/api/admin/proposals/:id/approve', authenticateToken, (req, res) => {
+  if (!req.user.isAdmin) return res.status(403).json({ error: 'Admin access required.' });
+  const proposalId = req.params.id;
+  
+  db.get('SELECT * FROM moderation_proposals WHERE id = ?', [proposalId], (err, proposal) => {
+    if (err || !proposal) return res.status(404).json({ error: 'Proposal not found.' });
+    if (proposal.status !== 'pending') return res.status(400).json({ error: 'Proposal already processed.' });
+    
+    // Execute the proposal directly
+    let sql, params;
+    if (proposal.type === 'delete') {
+      if (proposal.target_type === 'topic') {
+        sql = 'DELETE FROM topics WHERE id = ?'; params = [proposal.target_id];
+      } else if (proposal.target_type === 'object') {
+        sql = 'DELETE FROM objects WHERE id = ?'; params = [proposal.target_id];
+      } else if (proposal.target_type === 'rating') {
+        sql = 'DELETE FROM ratings WHERE id = ?'; params = [proposal.target_id];
+      }
+    } else if (proposal.type === 'edit') {
+      if (proposal.target_type === 'topic') {
+        sql = 'UPDATE topics SET name = ? WHERE id = ?'; params = [proposal.new_value, proposal.target_id];
+      } else if (proposal.target_type === 'object') {
+        sql = 'UPDATE objects SET name = ? WHERE id = ?'; params = [proposal.new_value, proposal.target_id];
+      } else if (proposal.target_type === 'rating') {
+        sql = 'UPDATE ratings SET review = ? WHERE id = ?'; params = [proposal.new_value, proposal.target_id];
+      }
+    }
+    
+    if (!sql) return res.status(400).json({ error: 'Invalid proposal type/target.' });
+    
+    db.run(sql, params, function(err) {
+      if (err) return res.status(500).json({ error: 'Database error.' });
+      db.run('UPDATE moderation_proposals SET status = ? WHERE id = ?', ['approved', proposalId], function(err) {
+        if (err) return res.status(500).json({ error: 'Database error.' });
+        res.json({ success: true });
+      });
+    });
+  });
+});
+
+// Admin reject proposal
+app.post('/api/admin/proposals/:id/reject', authenticateToken, (req, res) => {
+  if (!req.user.isAdmin) return res.status(403).json({ error: 'Admin access required.' });
+  const proposalId = req.params.id;
+  
+  db.run('UPDATE moderation_proposals SET status = ? WHERE id = ?', ['rejected', proposalId], function(err) {
+    if (err) return res.status(500).json({ error: 'Database error.' });
+    res.json({ success: true });
   });
 });
 

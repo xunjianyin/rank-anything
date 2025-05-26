@@ -1678,67 +1678,147 @@ function closeAdminPanel() {
     document.getElementById('admin-panel-modal').style.display = 'none';
 }
 
-function renderAdminPanel() {
+async function renderAdminPanel() {
     const modal = document.getElementById('admin-panel-modal');
-    let html = `<div class='modal-content admin-panel-modal-content'><div class='modal-header'><h2>Admin Panel</h2><button class='modal-close' onclick='closeAdminPanel()'><i class='fas fa-times'></i></button></div><div class='modal-body'><h3>All Users</h3><div id='admin-users-list'></div></div></div>`;
+    let html = `<div class='modal-content admin-panel-modal-content'><div class='modal-header'><h2>Admin Panel</h2><button class='modal-close' onclick='closeAdminPanel()'><i class='fas fa-times'></i></button></div><div class='modal-body'><h3>All Users</h3><div id='admin-users-list'>Loading...</div></div></div>`;
     modal.innerHTML = html;
-    renderAdminUsersList();
+    await renderAdminUsersList();
 }
 
-function renderAdminUsersList() {
+async function renderAdminUsersList() {
     const container = document.getElementById('admin-users-list');
-    let html = '<table style="width:100%;border-collapse:collapse;"><tr><th>Username</th><th>Email</th><th>Actions</th></tr>';
-    for (const username in data.users) {
-        const user = data.users[username];
-        html += `<tr><td>${escapeHtml(user.username)}${user.isAdmin ? ' <span style=\'color:red;font-weight:bold\'>(Admin)</span>' : ''}</td><td>${escapeHtml(user.email)}</td><td>`;
-        if (!user.isAdmin) {
-            html += `<button class='btn btn-small btn-secondary' onclick='adminEditUser("${user.username}")'>Edit</button> <button class='btn btn-small btn-danger' onclick='adminDeleteUser("${user.username}")'>Delete</button>`;
-        } else {
-            html += '-';
+    try {
+        const token = getAuthToken();
+        const response = await fetch(BACKEND_URL + '/api/admin/users', {
+            headers: { 'Authorization': 'Bearer ' + token }
+        });
+        
+        if (!response.ok) {
+            throw new Error('Failed to fetch users');
         }
-        html += '</td></tr>';
+        
+        const users = await response.json();
+        let html = '<table style="width:100%;border-collapse:collapse;border:1px solid #ddd;"><tr style="background:#f5f5f5;"><th style="padding:8px;border:1px solid #ddd;">Username</th><th style="padding:8px;border:1px solid #ddd;">Email</th><th style="padding:8px;border:1px solid #ddd;">Admin</th><th style="padding:8px;border:1px solid #ddd;">Actions</th></tr>';
+        
+        users.forEach(user => {
+            html += `<tr><td style="padding:8px;border:1px solid #ddd;">${escapeHtml(user.username)}</td><td style="padding:8px;border:1px solid #ddd;">${escapeHtml(user.email)}</td><td style="padding:8px;border:1px solid #ddd;">${user.is_admin ? 'Yes' : 'No'}</td><td style="padding:8px;border:1px solid #ddd;">`;
+            if (user.id !== currentUser.id) {
+                html += `<button class='btn btn-small btn-secondary' onclick='adminEditUser(${user.id}, "${escapeHtml(user.username)}", "${escapeHtml(user.email)}", ${user.is_admin})' style='margin-right:5px;'>Edit</button>`;
+                html += `<button class='btn btn-small btn-danger' onclick='adminDeleteUser(${user.id}, "${escapeHtml(user.username)}")'>Delete</button>`;
+            } else {
+                html += 'Current User';
+            }
+            html += '</td></tr>';
+        });
+        html += '</table>';
+        container.innerHTML = html;
+    } catch (error) {
+        container.innerHTML = '<div class="error">Failed to load users: ' + error.message + '</div>';
     }
-    html += '</table>';
-    container.innerHTML = html;
 }
 
-function adminEditUser(username) {
-    const user = data.users[username];
-    if (!user) return;
-    const newEmail = prompt('Edit email for ' + username, user.email);
-    if (!newEmail) return;
-    user.email = newEmail;
-    saveData();
-    renderAdminUsersList();
-    showNotification('User updated by admin');
+async function adminEditUser(userId, currentUsername, currentEmail, isCurrentlyAdmin) {
+    const newUsername = prompt('Edit username:', currentUsername);
+    if (!newUsername || newUsername === currentUsername) return;
+    
+    const newEmail = prompt('Edit email:', currentEmail);
+    if (!newEmail || newEmail === currentEmail) return;
+    
+    const makeAdmin = confirm('Make this user an admin?');
+    
+    try {
+        const token = getAuthToken();
+        const response = await fetch(BACKEND_URL + `/api/admin/users/${userId}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + token
+            },
+            body: JSON.stringify({
+                username: newUsername,
+                email: newEmail,
+                is_admin: makeAdmin
+            })
+        });
+        
+        if (!response.ok) {
+            throw new Error('Failed to update user');
+        }
+        
+        await renderAdminUsersList();
+        showNotification('User updated successfully');
+    } catch (error) {
+        alert('Failed to update user: ' + error.message);
+    }
 }
 
-function adminDeleteUser(username) {
-    if (!confirm('Delete user ' + username + '? This cannot be undone.')) return;
-    delete data.users[username];
-    saveData();
-    renderAdminUsersList();
-    showNotification('User deleted by admin');
+async function adminDeleteUser(userId, username) {
+    if (!confirm(`Delete user "${username}"? This cannot be undone.`)) return;
+    
+    try {
+        const token = getAuthToken();
+        const response = await fetch(BACKEND_URL + `/api/admin/users/${userId}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': 'Bearer ' + token }
+        });
+        
+        if (!response.ok) {
+            throw new Error('Failed to delete user');
+        }
+        
+        await renderAdminUsersList();
+        showNotification('User deleted successfully');
+    } catch (error) {
+        alert('Failed to delete user: ' + error.message);
+    }
 }
 
 // Admin direct edit/delete for topics/objects/users
 function isAdmin() { return currentUser && currentUser.isAdmin; }
 
 // Admin proposal actions
-function adminApproveProposal(proposalId) {
+async function adminApproveProposal(proposalId) {
     if (!isAdmin()) return;
-    executeProposal(proposalId);
-    showNotification('Proposal approved and executed by admin');
-    renderProposals();
+    try {
+        const token = getAuthToken();
+        const response = await fetch(BACKEND_URL + `/api/admin/proposals/${proposalId}/approve`, {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + token }
+        });
+        
+        if (!response.ok) {
+            throw new Error('Failed to approve proposal');
+        }
+        
+        showNotification('Proposal approved and executed by admin');
+        if (typeof renderProposals === 'function') {
+            renderProposals();
+        }
+    } catch (error) {
+        alert('Failed to approve proposal: ' + error.message);
+    }
 }
 
-function adminVetoProposal(proposalId) {
+async function adminVetoProposal(proposalId) {
     if (!isAdmin()) return;
-    delete data.proposals[proposalId];
-    saveData();
-    updateProposalCount();
-    showNotification('Proposal vetoed and removed by admin');
-    renderProposals();
+    try {
+        const token = getAuthToken();
+        const response = await fetch(BACKEND_URL + `/api/admin/proposals/${proposalId}/reject`, {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + token }
+        });
+        
+        if (!response.ok) {
+            throw new Error('Failed to reject proposal');
+        }
+        
+        showNotification('Proposal rejected by admin');
+        if (typeof renderProposals === 'function') {
+            renderProposals();
+        }
+    } catch (error) {
+        alert('Failed to reject proposal: ' + error.message);
+    }
 }
 
 // Add global for selected time range
