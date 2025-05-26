@@ -2154,51 +2154,198 @@ async function renderObjectStatsPage() {
     try {
         const object = await fetchObject(currentObjectId);
         const ratings = await fetchRatings(currentObjectId);
+        const tags = await fetchObjectTags(currentObjectId);
         
         if (!object) {
             container.innerHTML = '<div class="error">Object not found</div>';
             return;
         }
-    // Chart.js loader
-    if (!window.Chart) {
-        const script = document.createElement('script');
-        script.src = 'https://cdn.jsdelivr.net/npm/chart.js';
-        script.onload = () => renderObjectStatsPage();
-        document.body.appendChild(script);
-        container.innerHTML = '<div style="text-align:center;padding:2rem;">Loading charts...</div>';
-        return;
-    }
-    // Chart.js zoom/drag plugin loader
-    if (!window.ChartZoom) {
-        const script = document.createElement('script');
-        script.src = 'https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js';
-        script.onload = () => { window.ChartZoom = true; renderObjectStatsPage(); };
-        document.body.appendChild(script);
-        return;
-    }
-    // UI for granularity and reset
-    let html = `<h2>Statistics for: ${escapeHtml(object.name)}</h2>`;
-    html += `<div style='margin-bottom:1rem;'>
-        <label for='stats-granularity'><strong>Time Granularity:</strong></label>
-        <select id='stats-granularity'>
-            <option value='day'>Day</option>
-            <option value='week'>Week</option>
-            <option value='month'>Month</option>
-            <option value='year'>Year</option>
-            <option value='hour'>Hour</option>
-            <option value='minute'>Minute</option>
-        </select>
-        <button class='btn btn-small' onclick='objectStatsSelectedRange=null;renderObjectStatsPage()' style='margin-left:1rem;'>Reset Selection</button>
-    </div>`;
-    html += `<div style='display:flex;flex-wrap:wrap;gap:2rem;'>
-        <div style='flex:1;min-width:320px;'>
-            <canvas id='ratings-bar-chart'></canvas>
-        </div>
-        <div style='flex:2;min-width:480px;overflow-x:auto;'>
-            <canvas id='ratings-line-chart' style='min-width:600px;'></canvas>
-        </div>
-    </div>`;
-    container.innerHTML = html;
+        
+        // Chart.js loader
+        if (!window.Chart) {
+            const script = document.createElement('script');
+            script.src = 'https://cdn.jsdelivr.net/npm/chart.js';
+            script.onload = () => renderObjectStatsPage();
+            document.body.appendChild(script);
+            container.innerHTML = '<div style="text-align:center;padding:2rem;">Loading charts...</div>';
+            return;
+        }
+        
+        // Chart.js zoom/drag plugin loader
+        if (!window.ChartZoom) {
+            const script = document.createElement('script');
+            script.src = 'https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js';
+            script.onload = () => { window.ChartZoom = true; renderObjectStatsPage(); };
+            document.body.appendChild(script);
+            return;
+        }
+        
+        // Calculate statistics
+        const averageRating = calculateAverageRating(ratings);
+        const totalRatings = ratings.length;
+        const ratingCounts = [0, 0, 0, 0, 0];
+        ratings.forEach(r => {
+            if (r.rating >= 1 && r.rating <= 5) ratingCounts[r.rating - 1]++;
+        });
+        
+        // Calculate additional statistics
+        const mostRecentRating = ratings.length > 0 ? new Date(Math.max(...ratings.map(r => new Date(r.created_at)))) : null;
+        const oldestRating = ratings.length > 0 ? new Date(Math.min(...ratings.map(r => new Date(r.created_at)))) : null;
+        const uniqueReviewers = new Set(ratings.map(r => r.user_id)).size;
+        const ratingsWithReviews = ratings.filter(r => r.review && r.review.trim()).length;
+        
+        // Create comprehensive HTML layout
+        let html = `
+            <div class="object-stats-container">
+                <!-- Header Section -->
+                <div class="stats-header">
+                    <div class="stats-title-section">
+                        <h2><i class="fas fa-chart-line"></i> Statistics for: ${escapeHtml(object.name)}</h2>
+                        <div class="object-meta">
+                            <span class="created-by">Created by: ${escapeHtml(object.creator_username || 'Unknown')}</span>
+                            <span class="created-date">Created: ${formatDate(object.created_at)}</span>
+                        </div>
+                        ${tags.length > 0 ? `
+                            <div class="object-tags">
+                                ${tags.map(tag => `<span class="tag">${escapeHtml(tag.name)}</span>`).join('')}
+                            </div>
+                        ` : ''}
+                    </div>
+                </div>
+                
+                <!-- Key Statistics Cards -->
+                <div class="stats-overview">
+                    <div class="stat-card primary">
+                        <div class="stat-icon"><i class="fas fa-star"></i></div>
+                        <div class="stat-content">
+                            <div class="stat-number">${averageRating > 0 ? averageRating.toFixed(2) : 'N/A'}</div>
+                            <div class="stat-label">Average Rating</div>
+                            ${averageRating > 0 ? `<div class="stat-stars">${renderStars(averageRating)}</div>` : ''}
+                        </div>
+                    </div>
+                    
+                    <div class="stat-card secondary">
+                        <div class="stat-icon"><i class="fas fa-users"></i></div>
+                        <div class="stat-content">
+                            <div class="stat-number">${totalRatings}</div>
+                            <div class="stat-label">Total Ratings</div>
+                            <div class="stat-detail">${uniqueReviewers} unique reviewer${uniqueReviewers !== 1 ? 's' : ''}</div>
+                        </div>
+                    </div>
+                    
+                    <div class="stat-card tertiary">
+                        <div class="stat-icon"><i class="fas fa-comment"></i></div>
+                        <div class="stat-content">
+                            <div class="stat-number">${ratingsWithReviews}</div>
+                            <div class="stat-label">Written Reviews</div>
+                            <div class="stat-detail">${totalRatings > 0 ? Math.round((ratingsWithReviews / totalRatings) * 100) : 0}% with text</div>
+                        </div>
+                    </div>
+                    
+                    <div class="stat-card quaternary">
+                        <div class="stat-icon"><i class="fas fa-clock"></i></div>
+                        <div class="stat-content">
+                            <div class="stat-number">${mostRecentRating ? formatDate(mostRecentRating).split(',')[0] : 'N/A'}</div>
+                            <div class="stat-label">Latest Rating</div>
+                            <div class="stat-detail">${oldestRating ? 'Since ' + formatDate(oldestRating).split(',')[0] : ''}</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Controls Section -->
+                <div class="stats-controls">
+                    <div class="control-group">
+                        <label for="stats-granularity"><i class="fas fa-calendar-alt"></i> Time Granularity:</label>
+                        <select id="stats-granularity" class="control-select">
+                            <option value="minute">Minute</option>
+                            <option value="hour">Hour</option>
+                            <option value="day">Day</option>
+                            <option value="week">Week</option>
+                            <option value="month">Month</option>
+                            <option value="year">Year</option>
+                        </select>
+                    </div>
+                    <button class="btn btn-secondary" onclick="objectStatsSelectedRange=null;renderObjectStatsPage()">
+                        <i class="fas fa-undo"></i> Reset Selection
+                    </button>
+                </div>
+                
+                <!-- Charts Section -->
+                <div class="charts-container">
+                    <!-- Rating Distribution -->
+                    <div class="chart-section">
+                        <div class="chart-header">
+                            <h3><i class="fas fa-chart-bar"></i> Rating Distribution</h3>
+                            <div class="chart-info">
+                                ${objectStatsSelectedRange ? 'Filtered by time selection' : 'All ratings'}
+                            </div>
+                        </div>
+                        <div class="chart-wrapper">
+                            <canvas id="ratings-bar-chart"></canvas>
+                        </div>
+                    </div>
+                    
+                    <!-- Rating Trends -->
+                    <div class="chart-section full-width">
+                        <div class="chart-header">
+                            <h3><i class="fas fa-chart-line"></i> Rating Trends Over Time</h3>
+                            <div class="chart-info">
+                                Drag to zoom, pan to navigate • Average rating per time period
+                            </div>
+                        </div>
+                        <div class="chart-wrapper">
+                            <canvas id="ratings-line-chart"></canvas>
+                        </div>
+                    </div>
+                    
+                    <!-- Rating Frequency -->
+                    <div class="chart-section">
+                        <div class="chart-header">
+                            <h3><i class="fas fa-chart-pie"></i> Rating Frequency</h3>
+                            <div class="chart-info">
+                                Distribution of ratings over time
+                            </div>
+                        </div>
+                        <div class="chart-wrapper">
+                            <canvas id="ratings-doughnut-chart"></canvas>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Detailed Statistics -->
+                <div class="detailed-stats">
+                    <h3><i class="fas fa-list-ul"></i> Detailed Breakdown</h3>
+                    <div class="stats-table">
+                        <div class="stats-row">
+                            <span class="stats-label">5-Star Ratings:</span>
+                            <span class="stats-value">${ratingCounts[4]} (${totalRatings > 0 ? Math.round((ratingCounts[4] / totalRatings) * 100) : 0}%)</span>
+                        </div>
+                        <div class="stats-row">
+                            <span class="stats-label">4-Star Ratings:</span>
+                            <span class="stats-value">${ratingCounts[3]} (${totalRatings > 0 ? Math.round((ratingCounts[3] / totalRatings) * 100) : 0}%)</span>
+                        </div>
+                        <div class="stats-row">
+                            <span class="stats-label">3-Star Ratings:</span>
+                            <span class="stats-value">${ratingCounts[2]} (${totalRatings > 0 ? Math.round((ratingCounts[2] / totalRatings) * 100) : 0}%)</span>
+                        </div>
+                        <div class="stats-row">
+                            <span class="stats-label">2-Star Ratings:</span>
+                            <span class="stats-value">${ratingCounts[1]} (${totalRatings > 0 ? Math.round((ratingCounts[1] / totalRatings) * 100) : 0}%)</span>
+                        </div>
+                        <div class="stats-row">
+                            <span class="stats-label">1-Star Ratings:</span>
+                            <span class="stats-value">${ratingCounts[0]} (${totalRatings > 0 ? Math.round((ratingCounts[0] / totalRatings) * 100) : 0}%)</span>
+                        </div>
+                        <div class="stats-row highlight">
+                            <span class="stats-label">Most Common Rating:</span>
+                            <span class="stats-value">${totalRatings > 0 ? (ratingCounts.indexOf(Math.max(...ratingCounts)) + 1) + ' Stars' : 'N/A'}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        container.innerHTML = html;
     // Set dropdown value and event
     const granSel = document.getElementById('stats-granularity');
     granSel.value = objectStatsGranularity || 'day';
@@ -2245,9 +2392,63 @@ async function renderObjectStatsPage() {
         bucketRanges.push({min: Math.min(...dates), max: Math.max(...dates)});
     });
     // --- Line chart ---
-    const ctx = document.getElementById('ratings-line-chart').getContext('2d');
+
+    // --- Bar chart: rating counts (filtered by selection if any) ---
+    let filteredRatings = ratings;
+    if (objectStatsSelectedRange && objectStatsSelectedRange.length === 2) {
+        const [minT, maxT] = objectStatsSelectedRange;
+        filteredRatings = ratings.filter(r => {
+            const t = new Date(r.created_at).getTime();
+            return t >= minT && t <= maxT;
+        });
+    }
+    const filteredRatingCounts = [0,0,0,0,0];
+    filteredRatings.forEach(r => {
+        if (r.rating >= 1 && r.rating <= 5) filteredRatingCounts[r.rating-1]++;
+    });
+    new Chart(document.getElementById('ratings-bar-chart').getContext('2d'), {
+        type: 'bar',
+        data: {
+            labels: ['1 Star', '2 Stars', '3 Stars', '4 Stars', '5 Stars'],
+            datasets: [{
+                label: 'Number of Ratings',
+                data: filteredRatingCounts,
+                backgroundColor: ['#f87171','#fbbf24','#facc15','#34d399','#60a5fa'],
+            }]
+        },
+        options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { 
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            const total = filteredRatingCounts.reduce((a, b) => a + b, 0);
+                            const percentage = total > 0 ? Math.round((context.parsed.x / total) * 100) : 0;
+                            return `${context.parsed.x} ratings (${percentage}%)`;
+                        }
+                    }
+                }
+            },
+            scales: { 
+                x: { 
+                    beginAtZero: true, 
+                    precision: 0,
+                    grid: { color: 'rgba(0,0,0,0.1)' }
+                },
+                y: {
+                    grid: { display: false }
+                }
+            }
+        }
+    });
+    
+    // Enhanced line chart with better styling
+    const lineCtx = document.getElementById('ratings-line-chart').getContext('2d');
     if (window.objectStatsLineChart) window.objectStatsLineChart.destroy();
-    window.objectStatsLineChart = new Chart(ctx, {
+    window.objectStatsLineChart = new Chart(lineCtx, {
         type: 'line',
         data: {
             labels: timeLabels,
@@ -2257,19 +2458,40 @@ async function renderObjectStatsPage() {
                 borderColor: '#6366f1',
                 backgroundColor: 'rgba(99,102,241,0.1)',
                 fill: true,
-                tension: 0.2
+                tension: 0.3,
+                pointBackgroundColor: '#6366f1',
+                pointBorderColor: '#ffffff',
+                pointBorderWidth: 2,
+                pointRadius: 4,
+                pointHoverRadius: 6
             }]
         },
         options: {
             responsive: true,
+            maintainAspectRatio: false,
             plugins: {
-                legend: { display: false },
+                legend: { 
+                    display: true,
+                    position: 'top',
+                    labels: {
+                        usePointStyle: true,
+                        padding: 20
+                    }
+                },
+                tooltip: {
+                    mode: 'index',
+                    intersect: false,
+                    backgroundColor: 'rgba(0,0,0,0.8)',
+                    titleColor: '#ffffff',
+                    bodyColor: '#ffffff',
+                    borderColor: '#6366f1',
+                    borderWidth: 1
+                },
                 zoom: {
                     pan: { enabled: true, mode: 'x' },
                     zoom: { drag: { enabled: true }, mode: 'x' },
                     limits: { x: { min: 0, max: timeLabels.length-1 } },
                     onZoomComplete: ({chart}) => {
-                        // Get visible range indices
                         const xScale = chart.scales.x;
                         const minIdx = Math.max(0, Math.floor(xScale.min));
                         const maxIdx = Math.min(bucketRanges.length-1, Math.ceil(xScale.max));
@@ -2281,7 +2503,6 @@ async function renderObjectStatsPage() {
                         renderObjectStatsPage();
                     },
                     onPanComplete: ({chart}) => {
-                        // Same as zoom
                         const xScale = chart.scales.x;
                         const minIdx = Math.max(0, Math.floor(xScale.min));
                         const maxIdx = Math.min(bucketRanges.length-1, Math.ceil(xScale.max));
@@ -2295,39 +2516,70 @@ async function renderObjectStatsPage() {
                 }
             },
             scales: {
-                y: { min: 1, max: 5, ticks: { stepSize: 1 } },
-                x: { ticks: { autoSkip: false } }
+                y: { 
+                    min: 1, 
+                    max: 5, 
+                    ticks: { stepSize: 1 },
+                    grid: { color: 'rgba(0,0,0,0.1)' },
+                    title: {
+                        display: true,
+                        text: 'Average Rating'
+                    }
+                },
+                x: { 
+                    ticks: { autoSkip: true, maxTicksLimit: 10 },
+                    grid: { color: 'rgba(0,0,0,0.1)' },
+                    title: {
+                        display: true,
+                        text: 'Time Period'
+                    }
+                }
+            },
+            interaction: {
+                mode: 'nearest',
+                axis: 'x',
+                intersect: false
             }
         }
     });
-    // --- Bar chart: rating counts (filtered by selection if any) ---
-    let filteredRatings = ratings;
-    if (objectStatsSelectedRange && objectStatsSelectedRange.length === 2) {
-        const [minT, maxT] = objectStatsSelectedRange;
-        filteredRatings = ratings.filter(r => {
-            const t = new Date(r.created_at).getTime();
-            return t >= minT && t <= maxT;
-        });
-    }
-    const ratingCounts = [0,0,0,0,0];
-    filteredRatings.forEach(r => {
-        if (r.rating >= 1 && r.rating <= 5) ratingCounts[r.rating-1]++;
-    });
-    new Chart(document.getElementById('ratings-bar-chart').getContext('2d'), {
-        type: 'bar',
+    
+    // Add doughnut chart for rating distribution
+    const doughnutCtx = document.getElementById('ratings-doughnut-chart').getContext('2d');
+    if (window.objectStatsDoughnutChart) window.objectStatsDoughnutChart.destroy();
+    window.objectStatsDoughnutChart = new Chart(doughnutCtx, {
+        type: 'doughnut',
         data: {
             labels: ['1 Star', '2 Stars', '3 Stars', '4 Stars', '5 Stars'],
             datasets: [{
-                label: 'Number of Ratings',
                 data: ratingCounts,
-                backgroundColor: ['#f87171','#fbbf24','#facc15','#34d399','#60a5fa'],
+                backgroundColor: ['#f87171', '#fbbf24', '#facc15', '#34d399', '#60a5fa'],
+                borderColor: '#ffffff',
+                borderWidth: 2,
+                hoverBorderWidth: 3
             }]
         },
         options: {
-            indexAxis: 'y',
             responsive: true,
-            plugins: { legend: { display: false } },
-            scales: { x: { beginAtZero: true, precision:0 } }
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'bottom',
+                    labels: {
+                        padding: 20,
+                        usePointStyle: true
+                    }
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            const total = ratingCounts.reduce((a, b) => a + b, 0);
+                            const percentage = total > 0 ? Math.round((context.parsed / total) * 100) : 0;
+                            return `${context.label}: ${context.parsed} (${percentage}%)`;
+                        }
+                    }
+                }
+            },
+            cutout: '60%'
         }
     });
     
