@@ -18,8 +18,8 @@ const contentFilter = new ContentFilter();
 // Email configuration
 const EMAIL_CONFIG = {
   host: 'smtp.163.com',
-  port: 465,
-  secure: true,
+  port: 25,
+  secure: false,
   auth: {
     user: 'rank_anything@163.com',
     pass: process.env.EMAIL_PASSWORD || 'RankAnything2025'
@@ -136,10 +136,30 @@ app.post('/api/register', validateContent, async (req, res) => {
             const emailResult = await sendVerificationEmail(email, verificationCode, username);
             if (!emailResult.success) {
               console.error('Failed to send verification email:', emailResult.error);
-              return res.status(500).json({ 
-                error: 'Failed to send verification email. Please try again later.',
-                details: emailResult.error
+              // Fallback: auto-verify users if email fails (until SMTP is properly configured)
+              db.run('UPDATE users SET email_verified = 1 WHERE id = ?', [userId], (err) => {
+                if (err) return res.status(500).json({ error: 'Database error.' });
+                
+                const token = jwt.sign({ 
+                  id: userId, 
+                  username: username, 
+                  email: email, 
+                  isAdmin: false 
+                }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+                
+                res.json({ 
+                  token, 
+                  user: { 
+                    id: userId, 
+                    username: username, 
+                    email: email, 
+                    isAdmin: false,
+                    emailVerified: true
+                  },
+                  message: 'Registration successful! (Email verification temporarily disabled - SMTP setup needed)'
+                });
               });
+              return;
             }
             
             res.json({ 
