@@ -133,7 +133,30 @@ app.post('/api/register', validateContent, async (req, res) => {
             const emailResult = await sendVerificationEmail(email, verificationCode, username);
             if (!emailResult.success) {
               console.error('Failed to send verification email:', emailResult.error);
-              return res.status(500).json({ error: 'Failed to send verification email. Please try again.' });
+              // For now, auto-verify users if email fails (temporary solution)
+              db.run('UPDATE users SET email_verified = 1 WHERE id = ?', [userId], (err) => {
+                if (err) return res.status(500).json({ error: 'Database error.' });
+                
+                const token = jwt.sign({ 
+                  id: userId, 
+                  username: username, 
+                  email: email, 
+                  isAdmin: false 
+                }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+                
+                res.json({ 
+                  token, 
+                  user: { 
+                    id: userId, 
+                    username: username, 
+                    email: email, 
+                    isAdmin: false,
+                    emailVerified: true
+                  },
+                  message: 'Registration successful! (Email verification temporarily disabled)'
+                });
+              });
+              return;
             }
             
             res.json({ 
@@ -236,7 +259,8 @@ app.post('/api/resend-verification', async (req, res) => {
             
             const emailResult = await sendVerificationEmail(user.email, verificationCode, user.username);
             if (!emailResult.success) {
-              return res.status(500).json({ error: 'Failed to send verification email.' });
+              console.error('Failed to resend verification email:', emailResult.error);
+              return res.status(500).json({ error: 'Failed to send verification email. Email service temporarily unavailable.' });
             }
             
             res.json({ message: 'Verification code sent successfully!' });
@@ -248,7 +272,8 @@ app.post('/api/resend-verification', async (req, res) => {
             
             const emailResult = await sendVerificationEmail(user.email, verificationCode, user.username);
             if (!emailResult.success) {
-              return res.status(500).json({ error: 'Failed to send verification email.' });
+              console.error('Failed to resend verification email:', emailResult.error);
+              return res.status(500).json({ error: 'Failed to send verification email. Email service temporarily unavailable.' });
             }
             
             res.json({ message: 'Verification code sent successfully!' });
