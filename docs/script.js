@@ -2104,3 +2104,22 @@ window.showAddObjectForm = showAddObjectForm;
 window.hideAddObjectForm = hideAddObjectForm;
 window.addObject = addObject;
 // Add more as needed for other UI functions referenced in HTML
+
+// UI functions for showing/hiding add topic/object forms
+function showAddTopicForm() {
+    document.getElementById('add-topic-form').style.display = 'block';
+    document.getElementById('topic-name').focus();
+}
+function hideAddTopicForm() {
+    document.getElementById('add-topic-form').style.display = 'none';
+    document.getElementById('topic-name').value = '';
+}
+function showAddObjectForm() {
+    document.getElementById('add-object-form').style.display = 'block';
+    document.getElementById('object-name').focus();
+}
+function hideAddObjectForm() {
+    document.getElementById('add-object-form').style.display = 'none';
+    document.getElementById('object-name').value = '';
+    document.getElementById('object-tags').value = '';
+}
