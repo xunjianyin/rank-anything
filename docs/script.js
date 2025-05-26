@@ -221,13 +221,18 @@ function logout() {
     showHomePage();
 }
 
+// Fix: Only decode JWT if present and valid
 async function checkUserSession() {
     const token = getAuthToken();
-    if (token) {
-        // Optionally, fetch user info from backend
-        const payload = JSON.parse(atob(token.split('.')[1]));
-        currentUser = payload;
-        updateUserInterface();
+    if (token && token.split('.').length === 3) {
+        try {
+            const payload = JSON.parse(atob(token.split('.')[1]));
+            currentUser = payload;
+            updateUserInterface();
+        } catch (e) {
+            clearAuthToken();
+            currentUser = null;
+        }
     }
 }
 
@@ -2089,4 +2094,13 @@ window.executeProposalUI = async function(proposalId) {
     } catch (e) {
         alert('Failed to execute proposal: ' + e.message);
     }
-} 
+}
+
+// Ensure UI functions are globally available for HTML onclick
+window.showAddTopicForm = showAddTopicForm;
+window.hideAddTopicForm = hideAddTopicForm;
+window.addTopic = addTopic;
+window.showAddObjectForm = showAddObjectForm;
+window.hideAddObjectForm = hideAddObjectForm;
+window.addObject = addObject;
+// Add more as needed for other UI functions referenced in HTML
