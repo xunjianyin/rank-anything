@@ -1,6 +1,6 @@
 // Rank-Anything Web Application v2.0 with User Authentication
 // Set your backend API URL here:
-const BACKEND_URL = 'https://your-backend-url.onrender.com';
+const BACKEND_URL = 'https://rank-anything.onrender.com';
 console.log('Rank-Anything v2.0 - Script loaded successfully');
 
 // Application state
