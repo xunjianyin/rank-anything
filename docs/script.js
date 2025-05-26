@@ -1512,197 +1512,318 @@ function loadSampleData() {
 // loadSampleData(); 
 
 // User Space Modal
-function showUserSpacePage() {
+async function showUserSpacePage() {
     hideAllPages();
     document.getElementById('user-space-page').classList.add('active');
-    renderUserSpacePage();
+    await renderUserSpacePage();
 }
 
-function renderUserSpacePage() {
+async function renderUserSpacePage() {
     const container = document.getElementById('user-space-content');
-    let html = `
-        <div class="user-space-main">
-            <h2>User Space</h2>
-            <form id="user-info-form" onsubmit="updateUserInfo(event)">
-                <div class="form-group">
-                    <label for="user-space-username">Username</label>
-                    <input type="text" id="user-space-username" value="${escapeHtml(currentUser.username)}" required>
+    
+    if (!currentUser) {
+        container.innerHTML = '<div class="error">Please log in to view your user space.</div>';
+        return;
+    }
+    
+    container.innerHTML = '<div style="text-align:center;padding:2rem;">Loading user statistics...</div>';
+    
+    try {
+        const stats = await fetchUserStats(currentUser.id);
+        
+        let html = `
+            <div class="user-space-main">
+                <h2>User Space - ${escapeHtml(currentUser.username)}</h2>
+                
+                <!-- User Profile Section -->
+                <div class="user-profile-section">
+                    <h3>Profile Information</h3>
+                    <form id="user-info-form" onsubmit="updateUserInfo(event)">
+                        <div class="form-group">
+                            <label for="user-space-username">Username</label>
+                            <input type="text" id="user-space-username" value="${escapeHtml(currentUser.username)}" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="user-space-email">Email</label>
+                            <input type="email" id="user-space-email" value="${escapeHtml(currentUser.email)}" required>
+                        </div>
+                        <div class="form-actions">
+                            <button type="submit" class="btn btn-primary">Update Profile</button>
+                        </div>
+                    </form>
                 </div>
-                <div class="form-group">
-                    <label for="user-space-email">Email</label>
-                    <input type="email" id="user-space-email" value="${escapeHtml(currentUser.email)}" required>
+                
+                <hr>
+                
+                <!-- Statistics Overview -->
+                <div class="user-stats-section">
+                    <h3>Your Statistics</h3>
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-number">${stats.totals.total_topics}</div>
+                            <div class="stat-label">Topics Created</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-number">${stats.totals.total_objects}</div>
+                            <div class="stat-label">Objects Created</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-number">${stats.totals.total_ratings}</div>
+                            <div class="stat-label">Ratings Given</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-number">${stats.totals.total_proposals}</div>
+                            <div class="stat-label">Proposals Made</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-number">${stats.totals.total_votes}</div>
+                            <div class="stat-label">Votes Cast</div>
+                        </div>
+                    </div>
                 </div>
-                <div class="form-actions">
-                    <button type="submit" class="btn btn-primary">Update Info</button>
+                
+                <hr>
+                
+                <!-- Recent Activity -->
+                <div class="user-activity-section">
+                    <h3>Recent Activity (Last 30 Days)</h3>
+                    <div id="user-recent-activity"></div>
                 </div>
-            </form>
-            <hr>
-            <h3>Today's Activity</h3>
-            <div id="user-daily-activity"></div>
-        </div>
-    `;
-    container.innerHTML = html;
-    renderUserDailyActivity();
+                
+                <!-- Daily Activity Chart -->
+                <div class="user-daily-chart-section">
+                    <h3>Daily Activity (Last 7 Days)</h3>
+                    <div id="user-daily-chart-container">
+                        <canvas id="user-daily-chart" width="400" height="200"></canvas>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        container.innerHTML = html;
+        
+        // Render recent activity
+        renderUserRecentActivity(stats.recent_activity);
+        
+        // Render daily activity chart
+        renderUserDailyChart(stats.daily_activity);
+        
+    } catch (error) {
+        console.error('Error loading user statistics:', error);
+        container.innerHTML = '<div class="error">Failed to load user statistics: ' + error.message + '</div>';
+    }
 }
 
-function updateUserInfo(event) {
+// API functions for user statistics
+async function fetchUserStats(userId) {
+    const token = getAuthToken();
+    const res = await fetch(BACKEND_URL + `/api/users/${userId}/stats`, {
+        headers: { 'Authorization': 'Bearer ' + token }
+    });
+    if (!res.ok) throw new Error('Failed to fetch user statistics');
+    return await res.json();
+}
+
+async function updateUserProfile(userId, username, email) {
+    const token = getAuthToken();
+    const res = await fetch(BACKEND_URL + `/api/users/${userId}/profile`, {
+        method: 'PUT',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + token
+        },
+        body: JSON.stringify({ username, email })
+    });
+    if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || 'Failed to update profile');
+    }
+    return await res.json();
+}
+
+async function updateUserInfo(event) {
     event.preventDefault();
     const newUsername = document.getElementById('user-space-username').value.trim();
     const newEmail = document.getElementById('user-space-email').value.trim();
+    
     if (!newUsername || !newEmail) {
         alert('Username and email cannot be empty');
         return;
     }
-    // Prevent duplicate username (if changed)
-    if (newUsername !== currentUser.username && data.users[newUsername]) {
-        alert('Username already exists');
+    
+    if (newUsername === currentUser.username && newEmail === currentUser.email) {
+        showNotification('No changes to save');
         return;
     }
-    // Prevent duplicate email (if changed)
-    for (const userKey in data.users) {
-        if (userKey !== currentUser.username && data.users[userKey].email === newEmail) {
-            alert('Email already registered');
-            return;
-        }
+    
+    try {
+        const result = await updateUserProfile(currentUser.id, newUsername, newEmail);
+        
+        // Update current user and token
+        currentUser = result.user;
+        saveAuthToken(result.token);
+        
+        updateUserInterface();
+        showNotification('Profile updated successfully!');
+        
+        // Refresh the user space page to show updated stats
+        await renderUserSpacePage();
+        
+    } catch (error) {
+        alert('Failed to update profile: ' + error.message);
     }
-    // Update user info
-    const oldUsername = currentUser.username;
-    if (newUsername !== oldUsername) {
-        // Move user data to new username key
-        data.users[newUsername] = { ...currentUser, username: newUsername, email: newEmail };
-        delete data.users[oldUsername];
-        // Update references in dailyUsage
-        if (data.dailyUsage[oldUsername]) {
-            data.dailyUsage[newUsername] = data.dailyUsage[oldUsername];
-            delete data.dailyUsage[oldUsername];
-        }
-        // Update createdBy in topics, objects, ratings, proposals
-        data.topics.forEach(t => { if (t.createdBy === oldUsername) t.createdBy = newUsername; });
-        Object.values(data.objects).forEach(objArr => objArr.forEach(o => { if (o.createdBy === oldUsername) o.createdBy = newUsername; }));
-        Object.values(data.ratings).forEach(topicRatings => {
-            Object.values(topicRatings).forEach(rArr => rArr.forEach(r => { if (r.createdBy === oldUsername) r.createdBy = newUsername; }));
-        });
-        Object.values(data.proposals).forEach(p => { if (p.proposedBy === oldUsername) p.proposedBy = newUsername; if (p.votes[oldUsername]) { p.votes[newUsername] = p.votes[oldUsername]; delete p.votes[oldUsername]; } });
-        currentUser = data.users[newUsername];
-    } else {
-        data.users[newUsername].email = newEmail;
-        currentUser = data.users[newUsername];
-    }
-    saveData();
-    updateUserInterface();
-    showNotification('User info updated successfully!');
 }
 
-function renderUserDailyActivity() {
-    const container = document.getElementById('user-daily-activity');
-    if (!currentUser) { container.innerHTML = ''; return; }
-    const today = new Date().toDateString();
-    let activity = [];
-    // Topics created
-    data.topics.forEach(t => {
-        if (t.createdBy === currentUser.username && new Date(t.createdAt).toDateString() === today) {
-            activity.push({
-                type: 'Created Topic',
-                name: t.name,
-                time: t.createdAt
-            });
-        }
-        if (t.modifiedBy === currentUser.username && t.lastModified && new Date(t.lastModified).toDateString() === today) {
-            activity.push({
-                type: 'Modified Topic',
-                name: t.name,
-                time: t.lastModified
-            });
-        }
-    });
-    // Topics deleted (look for proposals executed by user or proposals for deletion by user)
-    Object.values(data.proposals).forEach(p => {
-        if (p.type === 'delete-topic' && p.proposedBy === currentUser.username && new Date(p.createdAt).toDateString() === today) {
-            activity.push({
-                type: 'Proposed Delete Topic',
-                name: (data.topics.find(t => t.id === p.targetId) || {name: '[Deleted Topic]'}).name,
-                time: p.createdAt
-            });
-        }
-        if ((p.type === 'edit-topic' || p.type === 'edit-object') && p.proposedBy === currentUser.username && new Date(p.createdAt).toDateString() === today) {
-            activity.push({
-                type: p.type === 'edit-topic' ? 'Proposed Edit Topic' : 'Proposed Edit Object',
-                name: p.changes.name || '[Unnamed]',
-                time: p.createdAt
-            });
-        }
-    });
-    // Objects created/modified
-    Object.keys(data.objects).forEach(topicId => {
-        (data.objects[topicId] || []).forEach(o => {
-            if (o.createdBy === currentUser.username && new Date(o.createdAt).toDateString() === today) {
-                activity.push({
-                    type: 'Created Object',
-                    name: o.name,
-                    time: o.createdAt
-                });
-            }
-            if (o.modifiedBy === currentUser.username && o.lastModified && new Date(o.lastModified).toDateString() === today) {
-                activity.push({
-                    type: 'Modified Object',
-                    name: o.name,
-                    time: o.lastModified
-                });
-            }
-        });
-    });
-    // Objects deleted (proposals)
-    Object.values(data.proposals).forEach(p => {
-        if (p.type === 'delete-object' && p.proposedBy === currentUser.username && new Date(p.createdAt).toDateString() === today) {
-            activity.push({
-                type: 'Proposed Delete Object',
-                name: (data.objects[p.topicId]||[]).find(o=>o.id===p.targetId)?.name || '[Deleted Object]',
-                time: p.createdAt
-            });
-        }
-    });
-    // Ratings (as before)
-    let ratings = [];
-    Object.keys(data.ratings).forEach(topicId => {
-        Object.keys(data.ratings[topicId] || {}).forEach(objectId => {
-            (data.ratings[topicId][objectId] || []).forEach(r => {
-                if (r.createdBy === currentUser.username && new Date(r.createdAt).toDateString() === today) {
-                    ratings.push({ ...r, topicId, objectId });
-                }
-            });
-        });
-    });
-    ratings.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-    ratings.forEach(r => {
-        activity.push({
-            type: 'Rated Object',
-            name: (data.objects[r.topicId]?.find(o => o.id === r.objectId)?.name || 'Object'),
-            time: r.createdAt,
-            extra: `Score: ${r.rating}`
-        });
-    });
-    // Proposal votes (approval/opposition)
-    Object.values(data.proposals).forEach(p => {
-        if (p.votes && p.votes[currentUser.username]) {
-            const voteTime = p.voteTimes && p.voteTimes[currentUser.username] ? p.voteTimes[currentUser.username] : p.createdAt;
-            if (new Date(voteTime).toDateString() === today) {
-                activity.push({
-                    type: p.votes[currentUser.username] === 'agree' ? 'Approved Proposal' : 'Opposed Proposal',
-                    name: `${p.type.replace('-', ' ')} by ${p.proposedBy}`,
-                    time: voteTime
-                });
-            }
-        }
-    });
-    // Sort by time
-    activity.sort((a, b) => new Date(a.time) - new Date(b.time));
-    let html = '';
-    if (activity.length > 0) {
-        html += `<ul class='user-activity-list'>` + activity.map(act => `<li><strong>${act.type}:</strong> ${escapeHtml(act.name)}${act.extra ? ' <span style="color:#888">(' + act.extra + ')</span>' : ''} <span class='activity-time'>(${formatDate(act.time)})</span></li>`).join('') + `</ul>`;
-    } else {
-        html = '<div>No activity today.</div>';
+function renderUserRecentActivity(activities) {
+    const container = document.getElementById('user-recent-activity');
+    
+    if (!activities || activities.length === 0) {
+        container.innerHTML = '<div class="empty-state"><p>No recent activity in the last 30 days.</p></div>';
+        return;
     }
+    
+    let html = '<div class="activity-list">';
+    
+    activities.forEach(activity => {
+        let activityText = '';
+        let extraInfo = '';
+        
+        switch (activity.type) {
+            case 'topic_created':
+                activityText = `Created topic: <strong>${escapeHtml(activity.item_name)}</strong>`;
+                break;
+            case 'object_created':
+                activityText = `Created object: <strong>${escapeHtml(activity.item_name)}</strong>`;
+                if (activity.topic_name) {
+                    extraInfo = ` in topic "${escapeHtml(activity.topic_name)}"`;
+                }
+                break;
+            case 'rating_submitted':
+                activityText = `Rated object: <strong>${escapeHtml(activity.item_name)}</strong>`;
+                extraInfo = ` (${activity.rating} stars)`;
+                if (activity.topic_name) {
+                    extraInfo += ` in topic "${escapeHtml(activity.topic_name)}"`;
+                }
+                break;
+            case 'proposal_created':
+                activityText = `Created ${activity.proposal_type} proposal for ${activity.target_type}`;
+                if (activity.reason) {
+                    extraInfo = ` - Reason: "${escapeHtml(activity.reason)}"`;
+                }
+                break;
+            case 'vote_cast':
+                activityText = `Voted ${activity.vote === 1 ? 'to approve' : 'to reject'} a ${activity.proposal_type} proposal for ${activity.target_type}`;
+                break;
+            default:
+                activityText = `${activity.type}: ${escapeHtml(activity.item_name || '')}`;
+        }
+        
+        html += `
+            <div class="activity-item">
+                <div class="activity-content">
+                    <span class="activity-text">${activityText}${extraInfo}</span>
+                    <span class="activity-time">${formatDate(activity.timestamp)}</span>
+                </div>
+            </div>
+        `;
+    });
+    
+    html += '</div>';
     container.innerHTML = html;
+}
+
+function renderUserDailyChart(dailyStats) {
+    // Load Chart.js if not already loaded
+    if (!window.Chart) {
+        const script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/npm/chart.js';
+        script.onload = () => renderUserDailyChart(dailyStats);
+        document.body.appendChild(script);
+        document.getElementById('user-daily-chart-container').innerHTML = '<div style="text-align:center;padding:1rem;">Loading chart...</div>';
+        return;
+    }
+    
+    // Process daily stats data
+    const last7Days = [];
+    const today = new Date();
+    for (let i = 6; i >= 0; i--) {
+        const date = new Date(today);
+        date.setDate(date.getDate() - i);
+        last7Days.push(date.toISOString().split('T')[0]);
+    }
+    
+    const topicsData = last7Days.map(date => {
+        const stat = dailyStats.find(s => s.date === date && s.type === 'topics');
+        return stat ? stat.count : 0;
+    });
+    
+    const objectsData = last7Days.map(date => {
+        const stat = dailyStats.find(s => s.date === date && s.type === 'objects');
+        return stat ? stat.count : 0;
+    });
+    
+    const ratingsData = last7Days.map(date => {
+        const stat = dailyStats.find(s => s.date === date && s.type === 'ratings');
+        return stat ? stat.count : 0;
+    });
+    
+    const labels = last7Days.map(date => {
+        const d = new Date(date);
+        return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    });
+    
+    const ctx = document.getElementById('user-daily-chart').getContext('2d');
+    
+    // Destroy existing chart if it exists
+    if (window.userDailyChart) {
+        window.userDailyChart.destroy();
+    }
+    
+    window.userDailyChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: 'Topics',
+                    data: topicsData,
+                    backgroundColor: 'rgba(99, 102, 241, 0.8)',
+                    borderColor: 'rgba(99, 102, 241, 1)',
+                    borderWidth: 1
+                },
+                {
+                    label: 'Objects',
+                    data: objectsData,
+                    backgroundColor: 'rgba(16, 185, 129, 0.8)',
+                    borderColor: 'rgba(16, 185, 129, 1)',
+                    borderWidth: 1
+                },
+                {
+                    label: 'Ratings',
+                    data: ratingsData,
+                    backgroundColor: 'rgba(245, 158, 11, 0.8)',
+                    borderColor: 'rgba(245, 158, 11, 1)',
+                    borderWidth: 1
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: {
+                    position: 'top',
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        stepSize: 1
+                    }
+                }
+            }
+        }
+    });
 }
 
 // Admin panel UI
@@ -2215,6 +2336,8 @@ window.showAddObjectForm = showAddObjectForm;
 window.hideAddObjectForm = hideAddObjectForm;
 window.addObject = addObject;
 window.showObjectStatsPage = showObjectStatsPage;
+window.showUserSpacePage = showUserSpacePage;
+window.updateUserInfo = updateUserInfo;
 // Add more as needed for other UI functions referenced in HTML
 
 // UI functions for showing/hiding add topic/object forms

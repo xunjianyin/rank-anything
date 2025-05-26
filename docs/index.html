@@ -309,8 +309,48 @@
                     </div>
                 </div>
                 <div id="user-space-page" class="page">
-                    <div class="container">
-                        <div id="user-space-content"></div>
+                    <div class="user-space-main">
+                        <!-- User Profile Section -->
+                        <div class="user-profile-section">
+                            <h2>Profile Settings</h2>
+                            <form id="user-info-form" onsubmit="updateUserInfo(event)">
+                                <div class="form-group">
+                                    <label for="user-space-username">Username</label>
+                                    <input type="text" id="user-space-username" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="user-space-email">Email</label>
+                                    <input type="email" id="user-space-email" required>
+                                </div>
+                                <div class="form-actions">
+                                    <button type="submit" class="btn btn-primary">Update Profile</button>
+                                </div>
+                            </form>
+                        </div>
+
+                        <!-- User Statistics Section -->
+                        <div class="user-stats-section">
+                            <h2>Your Statistics</h2>
+                            <div class="stats-grid" id="user-stats-grid">
+                                <!-- Stats will be dynamically populated -->
+                            </div>
+                        </div>
+
+                        <!-- Recent Activity Section -->
+                        <div class="user-activity-section">
+                            <h2>Recent Activity (Last 30 Days)</h2>
+                            <div id="user-recent-activity">
+                                <!-- Activity will be dynamically populated -->
+                            </div>
+                        </div>
+
+                        <!-- Daily Activity Chart Section -->
+                        <div class="user-daily-chart-section">
+                            <h2>Daily Activity (Last 7 Days)</h2>
+                            <div class="user-daily-chart-container" id="user-daily-chart-container">
+                                <canvas id="user-daily-chart"></canvas>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 <div id="object-stats-page" class="page">

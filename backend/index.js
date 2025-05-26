@@ -465,6 +465,182 @@ app.post('/api/admin/proposals/:id/reject', authenticateToken, (req, res) => {
   });
 });
 
+// --- User Statistics Endpoints ---
+// Get user statistics and activity
+app.get('/api/users/:id/stats', authenticateToken, (req, res) => {
+  const userId = req.params.id;
+  
+  // Only allow users to view their own stats or admin to view any
+  if (parseInt(userId) !== req.user.id && !req.user.isAdmin) {
+    return res.status(403).json({ error: 'Access denied.' });
+  }
+  
+  const stats = {};
+  
+  // Get total counts
+  db.get(`
+    SELECT 
+      (SELECT COUNT(*) FROM topics WHERE creator_id = ?) as total_topics,
+      (SELECT COUNT(*) FROM objects WHERE creator_id = ?) as total_objects,
+      (SELECT COUNT(*) FROM ratings WHERE user_id = ?) as total_ratings,
+      (SELECT COUNT(*) FROM moderation_proposals WHERE proposer_id = ?) as total_proposals,
+      (SELECT COUNT(*) FROM votes WHERE user_id = ?) as total_votes
+  `, [userId, userId, userId, userId, userId], (err, counts) => {
+    if (err) return res.status(500).json({ error: 'Database error.' });
+    stats.totals = counts;
+    
+    // Get recent activity (last 30 days)
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    
+    // Topics created
+    db.all(`
+      SELECT 'topic_created' as type, name as item_name, created_at as timestamp
+      FROM topics 
+      WHERE creator_id = ? AND created_at >= ?
+      ORDER BY created_at DESC
+    `, [userId, thirtyDaysAgo], (err, topicActivity) => {
+      if (err) return res.status(500).json({ error: 'Database error.' });
+      
+      // Objects created
+      db.all(`
+        SELECT 'object_created' as type, o.name as item_name, o.created_at as timestamp, t.name as topic_name
+        FROM objects o
+        LEFT JOIN topics t ON o.topic_id = t.id
+        WHERE o.creator_id = ? AND o.created_at >= ?
+        ORDER BY o.created_at DESC
+      `, [userId, thirtyDaysAgo], (err, objectActivity) => {
+        if (err) return res.status(500).json({ error: 'Database error.' });
+        
+        // Ratings submitted
+        db.all(`
+          SELECT 'rating_submitted' as type, o.name as item_name, r.created_at as timestamp, 
+                 r.rating, r.review, t.name as topic_name
+          FROM ratings r
+          LEFT JOIN objects o ON r.object_id = o.id
+          LEFT JOIN topics t ON o.topic_id = t.id
+          WHERE r.user_id = ? AND r.created_at >= ?
+          ORDER BY r.created_at DESC
+        `, [userId, thirtyDaysAgo], (err, ratingActivity) => {
+          if (err) return res.status(500).json({ error: 'Database error.' });
+          
+          // Proposals created
+          db.all(`
+            SELECT 'proposal_created' as type, type as proposal_type, target_type, 
+                   created_at as timestamp, status, reason
+            FROM moderation_proposals
+            WHERE proposer_id = ? AND created_at >= ?
+            ORDER BY created_at DESC
+          `, [userId, thirtyDaysAgo], (err, proposalActivity) => {
+            if (err) return res.status(500).json({ error: 'Database error.' });
+            
+            // Votes cast
+            db.all(`
+              SELECT 'vote_cast' as type, v.created_at as timestamp, v.vote,
+                     mp.type as proposal_type, mp.target_type
+              FROM votes v
+              LEFT JOIN moderation_proposals mp ON v.proposal_id = mp.id
+              WHERE v.user_id = ? AND v.created_at >= ?
+              ORDER BY v.created_at DESC
+            `, [userId, thirtyDaysAgo], (err, voteActivity) => {
+              if (err) return res.status(500).json({ error: 'Database error.' });
+              
+              // Combine all activities
+              const allActivity = [
+                ...topicActivity,
+                ...objectActivity,
+                ...ratingActivity,
+                ...proposalActivity,
+                ...voteActivity
+              ].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+              
+              stats.recent_activity = allActivity;
+              
+              // Get daily activity counts for the last 7 days
+              const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+              
+              db.all(`
+                SELECT DATE(created_at) as date, COUNT(*) as count, 'topics' as type
+                FROM topics 
+                WHERE creator_id = ? AND created_at >= ?
+                GROUP BY DATE(created_at)
+                UNION ALL
+                SELECT DATE(created_at) as date, COUNT(*) as count, 'objects' as type
+                FROM objects 
+                WHERE creator_id = ? AND created_at >= ?
+                GROUP BY DATE(created_at)
+                UNION ALL
+                SELECT DATE(created_at) as date, COUNT(*) as count, 'ratings' as type
+                FROM ratings 
+                WHERE user_id = ? AND created_at >= ?
+                GROUP BY DATE(created_at)
+                ORDER BY date DESC
+              `, [userId, sevenDaysAgo, userId, sevenDaysAgo, userId, sevenDaysAgo], (err, dailyStats) => {
+                if (err) return res.status(500).json({ error: 'Database error.' });
+                
+                stats.daily_activity = dailyStats;
+                res.json(stats);
+              });
+            });
+          });
+        });
+      });
+    });
+  });
+});
+
+// Update user profile
+app.put('/api/users/:id/profile', authenticateToken, (req, res) => {
+  const userId = req.params.id;
+  const { username, email } = req.body;
+  
+  // Only allow users to update their own profile or admin to update any
+  if (parseInt(userId) !== req.user.id && !req.user.isAdmin) {
+    return res.status(403).json({ error: 'Access denied.' });
+  }
+  
+  if (!username || !email) {
+    return res.status(400).json({ error: 'Username and email are required.' });
+  }
+  
+  // Check for duplicate username/email (excluding current user)
+  db.get('SELECT * FROM users WHERE (username = ? OR email = ?) AND id != ?', 
+    [username, email, userId], (err, existing) => {
+      if (err) return res.status(500).json({ error: 'Database error.' });
+      if (existing) {
+        return res.status(400).json({ error: 'Username or email already exists.' });
+      }
+      
+      db.run('UPDATE users SET username = ?, email = ? WHERE id = ?', 
+        [username, email, userId], function(err) {
+          if (err) return res.status(500).json({ error: 'Database error.' });
+          
+          // Return updated user info
+          db.get('SELECT id, username, email, is_admin FROM users WHERE id = ?', [userId], (err, user) => {
+            if (err) return res.status(500).json({ error: 'Database error.' });
+            
+            // Generate new token with updated info
+            const token = jwt.sign({ 
+              id: user.id, 
+              username: user.username, 
+              email: user.email, 
+              isAdmin: !!user.is_admin 
+            }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+            
+            res.json({ 
+              success: true, 
+              user: { 
+                id: user.id, 
+                username: user.username, 
+                email: user.email, 
+                isAdmin: !!user.is_admin 
+              },
+              token 
+            });
+          });
+        });
+    });
+});
+
 app.listen(PORT, () => {
   console.log(`Backend server running on port ${PORT}`);
 }); 
