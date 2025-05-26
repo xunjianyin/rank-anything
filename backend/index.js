@@ -18,7 +18,28 @@ const contentFilter = new ContentFilter();
 // Email configuration
 const EMAIL_CONFIG = {
   host: 'smtp.163.com',
-  port: 25,
+  port: 465,
+  secure: true,
+  auth: {
+    user: 'rank_anything@163.com',
+    pass: process.env.EMAIL_PASSWORD || 'QHDfYMBxDTyLdJVB'
+  },
+  tls: {
+    rejectUnauthorized: false
+  },
+  connectionTimeout: 60000,
+  greetingTimeout: 30000,
+  socketTimeout: 60000
+};
+
+// Create email transporter
+// Create email transporter with fallback configuration
+let transporter = nodemailer.createTransport(EMAIL_CONFIG);
+
+// Fallback configuration for port 587
+const EMAIL_CONFIG_FALLBACK = {
+  host: 'smtp.163.com',
+  port: 587,
   secure: false,
   auth: {
     user: 'rank_anything@163.com',
@@ -26,11 +47,23 @@ const EMAIL_CONFIG = {
   },
   tls: {
     rejectUnauthorized: false
-  }
+  },
+  connectionTimeout: 60000,
+  greetingTimeout: 30000,
+  socketTimeout: 60000
 };
 
-// Create email transporter
-const transporter = nodemailer.createTransport(EMAIL_CONFIG);
+// Gmail fallback configuration (more reliable for cloud hosting)
+const EMAIL_CONFIG_GMAIL = {
+  service: 'gmail',
+  auth: {
+    user: process.env.GMAIL_USER || 'rank.anything.app@gmail.com',
+    pass: process.env.GMAIL_APP_PASSWORD || 'your-app-password-here'
+  },
+  connectionTimeout: 60000,
+  greetingTimeout: 30000,
+  socketTimeout: 60000
+};
 
 // Password validation function
 function validatePassword(password) {
@@ -79,8 +112,40 @@ async function sendVerificationEmail(email, code, username) {
     await transporter.sendMail(mailOptions);
     return { success: true };
   } catch (error) {
-    console.error('Email sending error:', error);
-    return { success: false, error: error.message };
+    console.error('Email sending error (primary config):', error);
+    
+    // Try fallback configuration (port 587)
+    try {
+      console.log('Trying fallback email configuration (port 587)...');
+      const fallbackTransporter = nodemailer.createTransport(EMAIL_CONFIG_FALLBACK);
+      await fallbackTransporter.sendMail(mailOptions);
+      console.log('Email sent successfully with fallback configuration');
+      return { success: true };
+    } catch (fallbackError) {
+      console.error('Email sending error (fallback config):', fallbackError);
+      
+      // Try Gmail configuration as last resort
+      try {
+        console.log('Trying Gmail fallback configuration...');
+        const gmailTransporter = nodemailer.createTransporter(EMAIL_CONFIG_GMAIL);
+        
+        // Update mailOptions to use Gmail sender
+        const gmailMailOptions = {
+          ...mailOptions,
+          from: process.env.GMAIL_USER || 'rank.anything.app@gmail.com'
+        };
+        
+        await gmailTransporter.sendMail(gmailMailOptions);
+        console.log('Email sent successfully with Gmail configuration');
+        return { success: true };
+      } catch (gmailError) {
+        console.error('Email sending error (Gmail config):', gmailError);
+        return { 
+          success: false, 
+          error: `All email configurations failed. Primary: ${error.message}, Fallback: ${fallbackError.message}, Gmail: ${gmailError.message}` 
+        };
+      }
+    }
   }
 }
 
