@@ -50,11 +50,12 @@ app.post('/api/login', (req, res) => {
   if (!email || !password) {
     return res.status(400).json({ error: 'All fields are required.' });
   }
-  db.get('SELECT * FROM users WHERE email = ?', [email], (err, user) => {
+  // Allow login with either email or username
+  db.get('SELECT * FROM users WHERE email = ? OR username = ?', [email, email], (err, user) => {
     if (err) return res.status(500).json({ error: 'Database error.' });
-    if (!user) return res.status(400).json({ error: 'Invalid email or password.' });
+    if (!user) return res.status(400).json({ error: 'Invalid email/username or password.' });
     if (!bcrypt.compareSync(password, user.password)) {
-      return res.status(400).json({ error: 'Invalid email or password.' });
+      return res.status(400).json({ error: 'Invalid email/username or password.' });
     }
     const token = jwt.sign({ id: user.id, username: user.username, email: user.email }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
     res.json({ token, user: { id: user.id, username: user.username, email: user.email } });

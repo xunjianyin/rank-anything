@@ -79,11 +79,11 @@ function initializeAuthForms() {
 async function performLogin() {
     console.log('Perform login called');
     
-    const email = document.getElementById('login-username').value.trim();
+    const emailOrUsername = document.getElementById('login-username').value.trim();
     const password = document.getElementById('login-password').value;
     
-    if (!email || !password) {
-        alert('Please enter both email and password');
+    if (!emailOrUsername || !password) {
+        alert('Please enter both email/username and password');
         return;
     }
     
@@ -93,7 +93,7 @@ async function performLogin() {
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ email, password })
+            body: JSON.stringify({ email: emailOrUsername, password })
         });
         
         const result = await response.json();
