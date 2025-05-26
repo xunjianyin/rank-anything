@@ -489,7 +489,7 @@ function showHomePage() {
     clearSearch();
 }
 
-function showTopicPage(topicId) {
+async function showTopicPage(topicId) {
     currentPage = 'topic';
     currentTopicId = topicId;
     currentObjectId = null;
@@ -497,35 +497,55 @@ function showTopicPage(topicId) {
     hideAllPages();
     document.getElementById('topic-page').classList.add('active');
     
-    const topic = data.topics.find(t => t.id === topicId);
-    document.getElementById('topic-title').textContent = topic.name;
-    
-    // Show edit/delete buttons if user owns the topic
-    updateTopicActions(topic);
-    
-    updateBreadcrumb();
-    renderObjects();
-    clearSearch();
+    try {
+        const topic = await fetchTopic(topicId);
+        if (!topic) {
+            document.getElementById('topic-title').textContent = 'Topic not found';
+            return;
+        }
+        
+        document.getElementById('topic-title').textContent = topic.name;
+        
+        // Show edit/delete buttons if user owns the topic
+        updateTopicActions(topic);
+        
+        await updateBreadcrumb();
+        await renderObjects();
+        clearSearch();
+    } catch (error) {
+        console.error('Error loading topic:', error);
+        document.getElementById('topic-title').textContent = 'Error loading topic';
+    }
 }
 
-function showObjectPage(objectId) {
+async function showObjectPage(objectId) {
     currentPage = 'object';
     currentObjectId = objectId;
     
     hideAllPages();
     document.getElementById('object-page').classList.add('active');
     
-    const object = data.objects[currentTopicId].find(o => o.id === objectId);
-    document.getElementById('object-title').textContent = object.name;
-    
-    // Show edit/delete buttons if user owns the object
-    updateObjectActions(object);
-    
-    updateBreadcrumb();
-    renderObjectDetails();
-    renderReviews();
-    resetRatingForm();
-    clearSearch();
+    try {
+        const object = await fetchObject(objectId);
+        if (!object) {
+            document.getElementById('object-title').textContent = 'Object not found';
+            return;
+        }
+        
+        document.getElementById('object-title').textContent = object.name;
+        
+        // Show edit/delete buttons if user owns the object
+        updateObjectActions(object);
+        
+        updateBreadcrumb();
+        await renderObjectDetails();
+        await renderReviews();
+        resetRatingForm();
+        clearSearch();
+    } catch (error) {
+        console.error('Error loading object:', error);
+        document.getElementById('object-title').textContent = 'Error loading object';
+    }
 }
 
 function showSearchPage(query, searchType = 'all', tagFilters = null, tagLogic = 'and') {
@@ -556,19 +576,29 @@ function hideAllPages() {
     });
 }
 
-function updateBreadcrumb() {
+async function updateBreadcrumb() {
     const breadcrumb = document.getElementById('breadcrumb');
     let html = '';
     
     if (currentPage === 'home') {
         html = 'Topics';
     } else if (currentPage === 'topic') {
-        const topic = data.topics.find(t => t.id === currentTopicId);
-        html = `<a href="#" onclick="showHomePage()">Topics</a> > ${topic.name}`;
+        try {
+            const topic = await fetchTopic(currentTopicId);
+            html = `<a href="#" onclick="showHomePage()">Topics</a> > ${topic ? escapeHtml(topic.name) : 'Topic'}`;
+        } catch (error) {
+            html = `<a href="#" onclick="showHomePage()">Topics</a> > Topic`;
+        }
     } else if (currentPage === 'object') {
-        const topic = data.topics.find(t => t.id === currentTopicId);
-        const object = data.objects[currentTopicId].find(o => o.id === currentObjectId);
-        html = `<a href="#" onclick="showHomePage()">Topics</a> > <a href="#" onclick="showTopicPage('${currentTopicId}')">${topic.name}</a> > ${object.name}`;
+        try {
+            const topic = await fetchTopic(currentTopicId);
+            const object = await fetchObject(currentObjectId);
+            const topicName = topic ? escapeHtml(topic.name) : 'Topic';
+            const objectName = object ? escapeHtml(object.name) : 'Object';
+            html = `<a href="#" onclick="showHomePage()">Topics</a> > <a href="#" onclick="showTopicPage('${currentTopicId}')">${topicName}</a> > ${objectName}`;
+        } catch (error) {
+            html = `<a href="#" onclick="showHomePage()">Topics</a> > Topic > Object`;
+        }
     } else if (currentPage === 'search') {
         html = `<a href="#" onclick="showHomePage()">Topics</a> > Search Results`;
     } else if (currentPage === 'proposals') {
@@ -590,7 +620,7 @@ function updateTopicActions(topic) {
     if (proposeEditBtn) proposeEditBtn.remove();
     if (proposeDeleteBtn) proposeDeleteBtn.remove();
     // Show edit/delete for owner or admin
-    if (currentUser && (currentUser.isAdmin || topic.createdBy === currentUser.username)) {
+    if (currentUser && (currentUser.isAdmin || topic.creator_id === currentUser.id)) {
         editBtn.style.display = 'inline-flex';
         deleteBtn.style.display = 'inline-flex';
     } else {
@@ -635,7 +665,7 @@ function updateObjectActions(object) {
     if (proposeEditBtn) proposeEditBtn.remove();
     if (proposeDeleteBtn) proposeDeleteBtn.remove();
     // Show edit/delete for owner or admin
-    if (currentUser && (currentUser.isAdmin || object.createdBy === currentUser.username)) {
+    if (currentUser && (currentUser.isAdmin || object.creator_id === currentUser.id)) {
         editBtn.style.display = 'inline-flex';
         deleteBtn.style.display = 'inline-flex';
     } else {
@@ -919,9 +949,9 @@ function renderSearchObjects() {
     }).join('');
 }
 
-function showObjectFromSearch(topicId, objectId) {
+async function showObjectFromSearch(topicId, objectId) {
     currentTopicId = topicId;
-    showObjectPage(objectId);
+    await showObjectPage(objectId);
 }
 
 function searchByTag(tag, event) {
@@ -1045,6 +1075,17 @@ async function fetchObjects(topicId) {
     return await res.json();
 }
 
+async function fetchObject(objectId) {
+    // Since we don't have a direct object endpoint, we'll fetch from the current topic
+    const objects = await fetchObjects(currentTopicId);
+    return objects.find(obj => obj.id == objectId);
+}
+
+async function fetchTopic(topicId) {
+    const topics = await fetchTopics();
+    return topics.find(topic => topic.id == topicId);
+}
+
 async function createObject(topicId, name) {
     const token = getAuthToken();
     const res = await fetch(BACKEND_URL + `/api/topics/${topicId}/objects`, {
@@ -1137,35 +1178,32 @@ async function addObject(event) {
 }
 
 // Object details and rating
-function renderObjectDetails() {
-    const object = data.objects[currentTopicId].find(o => o.id === currentObjectId);
-    const ratings = data.ratings[currentTopicId][currentObjectId] || [];
-    const averageRating = calculateAverageRating(ratings);
-    const ratingCount = ratings.length;
-    
-    // Render tags
-    const tagsContainer = document.getElementById('object-tags-display');
-    if (object.tags.length > 0) {
-        tagsContainer.innerHTML = `
-            <div class="tags">
-                ${object.tags.map(tag => `<span class="tag clickable" onclick="searchByTag('${escapeHtml(tag)}', event)">${escapeHtml(tag)}</span>`).join('')}
-            </div>
-        `;
-    } else {
-        tagsContainer.innerHTML = '';
-    }
-    
-    // Render rating summary
-    const ratingSummary = document.getElementById('rating-summary');
-    if (averageRating > 0) {
-        ratingSummary.innerHTML = `
-            <span class="stars">${renderStars(averageRating)}</span>
-            <span class="rating-text">${averageRating.toFixed(1)} out of 5 (${ratingCount} review${ratingCount !== 1 ? 's' : ''})</span>
-        `;
-    } else {
-        ratingSummary.innerHTML = `
-            <span class="rating-text">No ratings yet - be the first to rate!</span>
-        `;
+async function renderObjectDetails() {
+    try {
+        const object = await fetchObject(currentObjectId);
+        const ratings = await fetchRatings(currentObjectId);
+        const averageRating = calculateAverageRating(ratings);
+        const ratingCount = ratings.length;
+        
+        // Render tags using the new API function
+        await renderObjectTags();
+        
+        // Render rating summary
+        const ratingSummary = document.getElementById('rating-summary');
+        if (averageRating > 0) {
+            ratingSummary.innerHTML = `
+                <span class="stars">${renderStars(averageRating)}</span>
+                <span class="rating-text">${averageRating.toFixed(1)} out of 5 (${ratingCount} review${ratingCount !== 1 ? 's' : ''})</span>
+            `;
+        } else {
+            ratingSummary.innerHTML = `
+                <span class="rating-text">No ratings yet - be the first to rate!</span>
+            `;
+        }
+    } catch (error) {
+        console.error('Error rendering object details:', error);
+        const ratingSummary = document.getElementById('rating-summary');
+        ratingSummary.innerHTML = '<span class="rating-text">Error loading object details</span>';
     }
 }
 
@@ -1242,8 +1280,8 @@ async function submitRating() {
     const reviewText = document.getElementById('review-text').value.trim();
     try {
         await submitRatingToAPI(currentObjectId, selectedRating, reviewText);
-        renderObjectDetails();
-        renderReviews();
+        await renderObjectDetails();
+        await renderReviews();
         resetRatingForm();
         showNotification('Rating submitted successfully!');
     } catch (e) {
