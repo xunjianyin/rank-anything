@@ -114,7 +114,19 @@ const init = () => {
       FOREIGN KEY (user_id) REFERENCES users(id)
     )`);
 
-    // Email verification table
+    // Pending registrations table (for users who haven't verified email yet)
+    db.run(`CREATE TABLE IF NOT EXISTS pending_registrations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT NOT NULL,
+      email TEXT NOT NULL,
+      password_hash TEXT NOT NULL,
+      verification_code TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      last_sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      expires_at DATETIME DEFAULT (datetime('now', '+24 hours'))
+    )`);
+
+    // Email verification table (for existing users)
     db.run(`CREATE TABLE IF NOT EXISTS email_verifications (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id INTEGER NOT NULL,
@@ -146,8 +158,8 @@ const init = () => {
       
       if (!user) {
         // Create admin user
-        db.run('INSERT INTO users (username, email, password, is_admin) VALUES (?, ?, ?, ?)', 
-          ['Admin', 'admin@system.local', adminPassword, 1], function(err) {
+        db.run('INSERT INTO users (username, email, password, is_admin, email_verified) VALUES (?, ?, ?, ?, ?)', 
+          ['Admin', 'admin@system.local', adminPassword, 1, 1], function(err) {
             if (err) {
               console.error('Error creating admin user:', err);
             } else {
@@ -163,6 +175,15 @@ const init = () => {
             console.log('Admin user updated to have admin privileges');
           }
         });
+      }
+    });
+
+    // Clean up expired pending registrations on startup
+    db.run('DELETE FROM pending_registrations WHERE expires_at <= datetime("now")', (err) => {
+      if (err) {
+        console.error('Error cleaning up expired registrations:', err);
+      } else {
+        console.log('Cleaned up expired pending registrations');
       }
     });
   });

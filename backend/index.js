@@ -149,25 +149,23 @@ app.post('/api/register', validateContent, async (req, res) => {
     return res.status(400).json({ error: passwordValidation.message });
   }
 
-  db.get('SELECT * FROM users WHERE email = ? OR username = ?', [email, username], async (err, user) => {
+  // Check if email or username already exists in users table (verified users)
+  db.get('SELECT * FROM users WHERE email = ? OR username = ?', [email, username], async (err, existingUser) => {
     if (err) return res.status(500).json({ error: 'Database error.' });
-    if (user) return res.status(400).json({ error: 'Email or username already exists.' });
+    if (existingUser) return res.status(400).json({ error: 'Email or username already exists.' });
     
-    const hash = bcrypt.hashSync(password, 10);
-    db.run('INSERT INTO users (username, email, password, email_verified) VALUES (?, ?, ?, ?)', 
-      [username, email, hash, 0], async function(err) {
-        if (err) return res.status(500).json({ error: 'Database error.' });
-        
-        const userId = this.lastID;
-        
-        // Generate and store verification code
-        const verificationCode = generateVerificationCode();
-        db.run('INSERT INTO email_verifications (user_id, verification_code) VALUES (?, ?)', 
-          [userId, verificationCode], async (err) => {
-            if (err) {
-              console.error('Error storing verification code:', err);
-              return res.status(500).json({ error: 'Database error.' });
-            }
+    // Check if there's already a pending registration with this email/username
+    db.get('SELECT * FROM pending_registrations WHERE email = ? OR username = ?', [email, username], async (err, pendingUser) => {
+      if (err) return res.status(500).json({ error: 'Database error.' });
+      
+      const hash = bcrypt.hashSync(password, 10);
+      const verificationCode = generateVerificationCode();
+      
+      if (pendingUser) {
+        // Update existing pending registration
+        db.run('UPDATE pending_registrations SET username = ?, email = ?, password_hash = ?, verification_code = ?, last_sent_at = CURRENT_TIMESTAMP, expires_at = datetime("now", "+24 hours") WHERE id = ?', 
+          [username, email, hash, verificationCode, pendingUser.id], async (err) => {
+            if (err) return res.status(500).json({ error: 'Database error.' });
             
             // Send verification email
             const emailResult = await sendVerificationEmail(email, verificationCode, username);
@@ -181,128 +179,147 @@ app.post('/api/register', validateContent, async (req, res) => {
             
             res.json({ 
               message: 'Please check your email for verification code to complete registration.',
-              userId: userId,
+              registrationId: pendingUser.id,
               username: username,
               email: email,
               requiresVerification: true,
               step: 'email_verification'
             });
           });
-      });
+      } else {
+        // Create new pending registration
+        db.run('INSERT INTO pending_registrations (username, email, password_hash, verification_code) VALUES (?, ?, ?, ?)', 
+          [username, email, hash, verificationCode], async function(err) {
+            if (err) return res.status(500).json({ error: 'Database error.' });
+            
+            const registrationId = this.lastID;
+            
+            // Send verification email
+            const emailResult = await sendVerificationEmail(email, verificationCode, username);
+            if (!emailResult.success) {
+              console.error('Failed to send verification email:', emailResult.error);
+              // Remove the pending registration if email fails
+              db.run('DELETE FROM pending_registrations WHERE id = ?', [registrationId]);
+              return res.status(500).json({ 
+                error: 'Failed to send verification email. Please try again later.',
+                details: emailResult.error
+              });
+            }
+            
+            res.json({ 
+              message: 'Please check your email for verification code to complete registration.',
+              registrationId: registrationId,
+              username: username,
+              email: email,
+              requiresVerification: true,
+              step: 'email_verification'
+            });
+          });
+      }
+    });
   });
 });
 
 // Email verification
 app.post('/api/verify-email', (req, res) => {
-  const { userId, verificationCode } = req.body;
-  if (!userId || !verificationCode) {
-    return res.status(400).json({ error: 'User ID and verification code are required.' });
+  const { registrationId, verificationCode } = req.body;
+  if (!registrationId || !verificationCode) {
+    return res.status(400).json({ error: 'Registration ID and verification code are required.' });
   }
 
-  // Check if verification code is valid
-  db.get('SELECT * FROM email_verifications WHERE user_id = ? AND verification_code = ?', 
-    [userId, verificationCode], (err, verification) => {
+  // Check if verification code is valid and not expired
+  db.get('SELECT * FROM pending_registrations WHERE id = ? AND verification_code = ? AND expires_at > datetime("now")', 
+    [registrationId, verificationCode], (err, pendingReg) => {
       if (err) return res.status(500).json({ error: 'Database error.' });
-      if (!verification) {
-        return res.status(400).json({ error: 'Invalid verification code.' });
+      if (!pendingReg) {
+        return res.status(400).json({ error: 'Invalid or expired verification code.' });
       }
 
-      // Update user as verified
-      db.run('UPDATE users SET email_verified = 1 WHERE id = ?', [userId], (err) => {
+      // Check again if email or username already exists (race condition protection)
+      db.get('SELECT * FROM users WHERE email = ? OR username = ?', [pendingReg.email, pendingReg.username], (err, existingUser) => {
         if (err) return res.status(500).json({ error: 'Database error.' });
+        if (existingUser) {
+          // Clean up pending registration
+          db.run('DELETE FROM pending_registrations WHERE id = ?', [registrationId]);
+          return res.status(400).json({ error: 'Email or username already exists.' });
+        }
 
-        // Get user details for token
-        db.get('SELECT * FROM users WHERE id = ?', [userId], (err, user) => {
-          if (err) return res.status(500).json({ error: 'Database error.' });
-          
-          const token = jwt.sign({ 
-            id: user.id, 
-            username: user.username, 
-            email: user.email, 
-            isAdmin: !!user.is_admin 
-          }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
-          
-          res.json({ 
-            token, 
-            user: { 
-              id: user.id, 
-              username: user.username, 
-              email: user.email, 
-              isAdmin: !!user.is_admin,
-              emailVerified: true
-            },
-            message: 'Email verified successfully!'
+        // Create the actual user account
+        db.run('INSERT INTO users (username, email, password, email_verified) VALUES (?, ?, ?, ?)', 
+          [pendingReg.username, pendingReg.email, pendingReg.password_hash, 1], function(err) {
+            if (err) return res.status(500).json({ error: 'Database error.' });
+            
+            const userId = this.lastID;
+            
+            // Clean up pending registration
+            db.run('DELETE FROM pending_registrations WHERE id = ?', [registrationId], (err) => {
+              if (err) console.error('Error cleaning up pending registration:', err);
+            });
+            
+            // Generate JWT token
+            const token = jwt.sign({ 
+              id: userId, 
+              username: pendingReg.username, 
+              email: pendingReg.email, 
+              isAdmin: false 
+            }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+            
+            res.json({ 
+              token, 
+              user: { 
+                id: userId, 
+                username: pendingReg.username, 
+                email: pendingReg.email, 
+                isAdmin: false,
+                emailVerified: true
+              },
+              message: 'Registration completed successfully! Welcome to Rank-Anything!'
+            });
           });
-        });
       });
     });
 });
 
 // Resend verification code
 app.post('/api/resend-verification', async (req, res) => {
-  const { userId } = req.body;
-  if (!userId) {
-    return res.status(400).json({ error: 'User ID is required.' });
+  const { registrationId } = req.body;
+  if (!registrationId) {
+    return res.status(400).json({ error: 'Registration ID is required.' });
   }
 
-  // Check rate limiting (1 hour)
-  db.get('SELECT * FROM email_verifications WHERE user_id = ?', [userId], async (err, verification) => {
+  // Get pending registration details
+  db.get('SELECT * FROM pending_registrations WHERE id = ?', [registrationId], async (err, pendingReg) => {
     if (err) return res.status(500).json({ error: 'Database error.' });
+    if (!pendingReg) return res.status(404).json({ error: 'Registration not found or expired.' });
     
-    if (verification) {
-      const lastSent = new Date(verification.last_sent_at);
-      const now = new Date();
-      const hoursSinceLastSent = (now - lastSent) / (1000 * 60 * 60);
-      
-      if (hoursSinceLastSent < 1) {
-        const minutesRemaining = Math.ceil((60 - (hoursSinceLastSent * 60)));
-        return res.status(429).json({ 
-          error: `Please wait ${minutesRemaining} minutes before requesting another verification code.` 
-        });
-      }
+    // Check rate limiting (1 hour)
+    const lastSent = new Date(pendingReg.last_sent_at);
+    const now = new Date();
+    const hoursSinceLastSent = (now - lastSent) / (1000 * 60 * 60);
+    
+    if (hoursSinceLastSent < 1) {
+      const minutesRemaining = Math.ceil((60 - (hoursSinceLastSent * 60)));
+      return res.status(429).json({ 
+        error: `Please wait ${minutesRemaining} minutes before requesting another verification code.` 
+      });
     }
 
-    // Get user details
-    db.get('SELECT * FROM users WHERE id = ?', [userId], async (err, user) => {
-      if (err) return res.status(500).json({ error: 'Database error.' });
-      if (!user) return res.status(404).json({ error: 'User not found.' });
-      
-      if (user.email_verified) {
-        return res.status(400).json({ error: 'Email is already verified.' });
-      }
-
-      // Generate new verification code
-      const verificationCode = generateVerificationCode();
-      
-      // Update or insert verification code
-      if (verification) {
-        db.run('UPDATE email_verifications SET verification_code = ?, last_sent_at = CURRENT_TIMESTAMP WHERE user_id = ?', 
-          [verificationCode, userId], async (err) => {
-            if (err) return res.status(500).json({ error: 'Database error.' });
-            
-            const emailResult = await sendVerificationEmail(user.email, verificationCode, user.username);
-            if (!emailResult.success) {
-              console.error('Failed to resend verification email:', emailResult.error);
-              return res.status(500).json({ error: 'Failed to send verification email. Email service temporarily unavailable.' });
-            }
-            
-            res.json({ message: 'Verification code sent successfully!' });
-          });
-      } else {
-        db.run('INSERT INTO email_verifications (user_id, verification_code) VALUES (?, ?)', 
-          [userId, verificationCode], async (err) => {
-            if (err) return res.status(500).json({ error: 'Database error.' });
-            
-            const emailResult = await sendVerificationEmail(user.email, verificationCode, user.username);
-            if (!emailResult.success) {
-              console.error('Failed to resend verification email:', emailResult.error);
-              return res.status(500).json({ error: 'Failed to send verification email. Email service temporarily unavailable.' });
-            }
-            
-            res.json({ message: 'Verification code sent successfully!' });
-          });
-      }
-    });
+    // Generate new verification code
+    const verificationCode = generateVerificationCode();
+    
+    // Update verification code and extend expiration
+    db.run('UPDATE pending_registrations SET verification_code = ?, last_sent_at = CURRENT_TIMESTAMP, expires_at = datetime("now", "+24 hours") WHERE id = ?', 
+      [verificationCode, registrationId], async (err) => {
+        if (err) return res.status(500).json({ error: 'Database error.' });
+        
+        const emailResult = await sendVerificationEmail(pendingReg.email, verificationCode, pendingReg.username);
+        if (!emailResult.success) {
+          console.error('Failed to resend verification email:', emailResult.error);
+          return res.status(500).json({ error: 'Failed to send verification email. Email service temporarily unavailable.' });
+        }
+        
+        res.json({ message: 'Verification code sent successfully!' });
+      });
   });
 });
 

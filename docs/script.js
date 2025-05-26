@@ -183,7 +183,7 @@ async function performRegister() {
             console.log('Step 5: Registration successful');
             if (result.requiresVerification) {
                 // Show verification modal
-                pendingVerificationUserId = result.userId;
+                pendingVerificationUserId = result.registrationId;
                 closeAuthModal();
                 showVerificationModal();
                 showNotification('Registration successful! Please check your email for verification code.');
@@ -473,7 +473,7 @@ async function handleEmailVerification(event) {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({ 
-                userId: pendingVerificationUserId, 
+                registrationId: pendingVerificationUserId, 
                 verificationCode: verificationCode 
             })
         });
@@ -511,7 +511,7 @@ async function resendVerificationCode() {
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ userId: pendingVerificationUserId })
+            body: JSON.stringify({ registrationId: pendingVerificationUserId })
         });
         
         const result = await response.json();
