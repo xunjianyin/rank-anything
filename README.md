@@ -1,179 +1,82 @@
-# Rank-Anything Web Application
+# Rank-Anything
 
-A simple, responsive web application that allows users to create topics, add objects within those topics, and rate them with a 5-star system and optional text reviews.
+## Project Overview
+Rank-Anything is a web application that enables users to rate and review items organized in a two-level structure: topics and objects. Users can create custom topics, add objects within those topics, assign tags, and rate/review objects. The app features user authentication, daily limits, and community moderation. All data is now stored on the server (not in the browser).
 
-## Features
+---
 
-### 🎯 **Two-Level Organization**
-- **Topics**: High-level categories (e.g., "Peking University Cafeteria Dishes")
-- **Objects**: Items within topics (e.g., "Shaoyuan Cafeteria Yellow Braised Chicken")
+## Architecture
+- **Frontend:** Static HTML/CSS/JS (in `/frontend`), API-driven, deployable to GitHub Pages, Vercel, or Netlify.
+- **Backend:** Node.js + Express + SQLite (in `/backend`), RESTful API, deployable to Render or any Node.js host.
 
-### ⭐ **Rating System**
-- 1-to-5 star ratings
-- Optional text reviews
-- Average rating calculation
-- Review count display
+---
 
-### 🏷️ **Tagging System**
-- Add multiple tags to objects for categorization
-- Visual tag display with styling
-- Easy filtering and organization
+## Deployment Instructions
 
-### 💾 **Data Persistence**
-- All data saved locally in browser storage
-- No server required
-- Data persists between sessions
+### 1. Backend (Render)
+1. Go to [Render.com](https://render.com/) and create a new Web Service.
+2. Connect your GitHub repo and select the `/backend` folder as the root.
+3. Set the build and start commands:
+   - **Build Command:** (leave blank)
+   - **Start Command:** `node index.js`
+4. Add an environment variable (optional for JWT secret):
+   - `JWT_SECRET=your_secret_key`
+5. Deploy. Note your backend URL (e.g., `https://rank-anything-backend.onrender.com`).
 
-### 📱 **Responsive Design**
-- Clean, modern interface
-- Mobile-friendly layout
-- Intuitive navigation with breadcrumbs
+### 2. Frontend (GitHub Pages, Vercel, or Netlify)
+1. Copy the contents of `/frontend` to a new repo or branch (or keep in the same repo).
+2. Set the `BACKEND_URL` at the top of `frontend/script.js` to your Render backend URL.
+   ```js
+   const BACKEND_URL = 'https://your-backend-url.onrender.com';
+   ```
+3. Deploy `/frontend` as a static site:
+   - **GitHub Pages:** Set source to `/frontend` folder or branch.
+   - **Vercel/Netlify:** Import the repo and select `/frontend` as the root.
 
-## How to Use
+---
 
-### Getting Started
-1. Open `index.html` in your web browser
-2. Start by creating your first topic
-3. Add objects to your topics
-4. Rate and review objects
+## Usage Guide
+- **Register/Login:** Create an account to use all features.
+- **Topics:** Create, view, edit, and delete topics.
+- **Objects:** Add objects to topics, assign tags, edit, and delete.
+- **Tags:** Assign multiple tags to objects for categorization and filtering.
+- **Ratings/Reviews:** Rate objects (1-5 stars) and leave reviews. Edit your own reviews.
+- **Daily Limits:** 4 topics, 32 objects, 64 ratings per user per day.
+- **Moderation:** Propose edits/deletes for content you don't own. Vote and execute proposals as a community.
 
-### Creating Topics
-1. Click the "Add Topic" button on the homepage
-2. Enter a descriptive name for your topic
-3. Click "Add Topic" to save
+---
 
-### Adding Objects
-1. Navigate to a topic by clicking on it
-2. Click "Add Object" button
-3. Enter the object name and optional tags (comma-separated)
-4. Click "Add Object" to save
+## API Endpoints (Backend)
+- `POST /api/register` — Register a new user
+- `POST /api/login` — Login and receive JWT
+- `GET /api/topics` — List topics
+- `POST /api/topics` — Create topic (auth)
+- `PUT /api/topics/:id` — Edit topic (auth, owner)
+- `DELETE /api/topics/:id` — Delete topic (auth, owner)
+- `GET /api/topics/:topicId/objects` — List objects in topic
+- `POST /api/topics/:topicId/objects` — Create object (auth)
+- `PUT /api/objects/:id` — Edit object (auth, owner)
+- `DELETE /api/objects/:id` — Delete object (auth, owner)
+- `GET /api/tags` — List tags
+- `POST /api/tags` — Create tag (auth)
+- `POST /api/objects/:objectId/tags` — Assign tags (auth, owner)
+- `GET /api/objects/:objectId/tags` — List tags for object
+- `GET /api/objects/:objectId/ratings` — List ratings/reviews
+- `POST /api/objects/:objectId/ratings` — Create/update rating (auth)
+- `GET /api/moderation/proposals` — List proposals (auth)
+- `POST /api/moderation/proposals` — Create proposal (auth)
+- `POST /api/moderation/proposals/:id/vote` — Vote on proposal (auth)
+- `POST /api/moderation/proposals/:id/execute` — Execute proposal (auth)
 
-### Rating Objects
-1. Click on any object to view its details
-2. Select a star rating (1-5 stars)
-3. Optionally add a text review
-4. Click "Submit Rating" to save
+---
 
-### Navigation
-- Click the logo to return to the homepage
-- Use breadcrumb navigation to move between levels
-- Click topic/object names to navigate back
+## Notes
+- All data is now stored on the server (SQLite DB in backend).
+- The frontend is fully API-driven and does not use localStorage for app data.
+- For production, use HTTPS for both frontend and backend.
+- You can use any static host for the frontend and any Node.js host for the backend.
 
-## File Structure
-
-```
-rank-anything/
-├── index.html          # Main HTML structure
-├── styles.css          # CSS styling and responsive design
-├── script.js           # JavaScript application logic
-└── README.md          # Documentation
-```
-
-## Technical Details
-
-### Technologies Used
-- **HTML5**: Semantic structure
-- **CSS3**: Modern styling with gradients, shadows, and transitions
-- **Vanilla JavaScript**: No frameworks or dependencies
-- **Local Storage**: Browser-based data persistence
-- **Font Awesome**: Icons
-- **Google Fonts**: Inter font family
-
-### Browser Compatibility
-- Modern browsers (Chrome, Firefox, Safari, Edge)
-- Mobile browsers
-- Requires JavaScript enabled
-
-### Data Structure
-```javascript
-{
-  topics: [
-    {
-      id: "unique_id",
-      name: "Topic Name",
-      createdAt: "ISO_date_string"
-    }
-  ],
-  objects: {
-    "topic_id": [
-      {
-        id: "unique_id",
-        name: "Object Name",
-        tags: ["tag1", "tag2"],
-        createdAt: "ISO_date_string"
-      }
-    ]
-  },
-  ratings: {
-    "topic_id": {
-      "object_id": [
-        {
-          rating: 4,
-          review: "Review text",
-          createdAt: "ISO_date_string"
-        }
-      ]
-    }
-  }
-}
-```
-
-## Sample Usage Examples
-
-### Example 1: Restaurant Reviews
-- **Topic**: "Downtown Restaurants"
-- **Objects**: "Mario's Pizza", "Sushi Palace", "Burger Joint"
-- **Tags**: "Italian", "Fast Food", "Japanese", "Expensive", "Casual"
-
-### Example 2: Movie Collection
-- **Topic**: "2023 Movies"
-- **Objects**: "The Batman", "Top Gun: Maverick", "Avatar 2"
-- **Tags**: "Action", "Drama", "Sci-Fi", "Sequel", "IMAX"
-
-### Example 3: University Courses
-- **Topic**: "Computer Science Courses"
-- **Objects**: "Data Structures", "Machine Learning", "Web Development"
-- **Tags**: "Programming", "Theory", "Practical", "Difficult", "Interesting"
-
-## Customization
-
-### Adding Sample Data
-Uncomment the last line in `script.js` to load sample data on first visit:
-```javascript
-loadSampleData();
-```
-
-### Styling
-Modify `styles.css` to customize:
-- Color scheme (update CSS custom properties)
-- Layout spacing
-- Typography
-- Component styling
-
-### Functionality
-Extend `script.js` to add:
-- Export/import data functionality
-- Search and filtering
-- Sorting options
-- Data validation
-- Additional rating metrics
-
-## Browser Storage
-
-The application uses `localStorage` to persist data. Data is automatically saved when:
-- Adding new topics
-- Adding new objects
-- Submitting ratings
-
-To clear all data, open browser developer tools and run:
-```javascript
-localStorage.removeItem('rankAnythingData');
-```
+---
 
 ## License
-
-This project is open source and available under the MIT License.
-
-## Support
-
-For issues or questions, please refer to the code comments or create an issue in the project repository. 
+MIT 

@@ -1,0 +1,30 @@
+### Register a new user
+POST http://localhost:3001/api/register
+Content-Type: application/json
+
+{
+  "username": "testuser",
+  "email": "testuser@example.com",
+  "password": "testpassword"
+}
+
+### Login
+POST http://localhost:3001/api/login
+Content-Type: application/json
+
+{
+  "email": "testuser@example.com",
+  "password": "testpassword"
+}
+
+### List topics
+GET http://localhost:3001/api/topics
+
+### Create a topic (replace TOKEN below)
+POST http://localhost:3001/api/topics
+Content-Type: application/json
+Authorization: Bearer TOKEN
+
+{
+  "name": "Sample Topic"
+} 
