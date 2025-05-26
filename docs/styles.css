@@ -820,21 +820,7 @@ body {
     color: #ffd700;
 }
 
-.star-rating:hover .star {
-    color: #e2e8f0;
-}
-
-.star-rating .star:hover ~ .star {
-    color: #e2e8f0;
-}
-
-.star-rating .star:hover,
-.star-rating .star:hover ~ .star:nth-last-child(1),
-.star-rating .star:hover ~ .star:nth-last-child(2),
-.star-rating .star:hover ~ .star:nth-last-child(3),
-.star-rating .star:hover ~ .star:nth-last-child(4) {
-    color: #ffd700;
-}
+/* Star highlighting is handled by JavaScript */
 
 #review-text {
     width: 100%;
