@@ -27,7 +27,7 @@ const EMAIL_CONFIG = {
 };
 
 // Create email transporter
-const transporter = nodemailer.createTransporter(EMAIL_CONFIG);
+const transporter = nodemailer.createTransport(EMAIL_CONFIG);
 
 // Password validation function
 function validatePassword(password) {
