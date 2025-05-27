@@ -2507,3 +2507,64 @@ const addDatabaseIndexes = () => {
   
   console.log('Database indexes initialized for better performance');
 }; 
+
+// Development endpoint to get verification codes (remove in production)
+app.get('/api/dev/pending-registrations', (req, res) => {
+  if (process.env.NODE_ENV === 'production') {
+    return res.status(404).json({ error: 'Not found' });
+  }
+  
+  db.all('SELECT id, username, email, verification_code, created_at FROM pending_registrations ORDER BY created_at DESC LIMIT 10', [], (err, rows) => {
+    if (err) return res.status(500).json({ error: 'Database error.' });
+    res.json(rows);
+  });
+});
+
+// Development endpoint to manually verify a user
+app.post('/api/dev/verify-user', (req, res) => {
+  if (process.env.NODE_ENV === 'production') {
+    return res.status(404).json({ error: 'Not found' });
+  }
+  
+  const { email } = req.body;
+  if (!email) {
+    return res.status(400).json({ error: 'Email is required' });
+  }
+  
+  // Find pending registration
+  db.get('SELECT * FROM pending_registrations WHERE email = ?', [email], (err, pendingReg) => {
+    if (err) return res.status(500).json({ error: 'Database error.' });
+    if (!pendingReg) return res.status(404).json({ error: 'Pending registration not found' });
+    
+    // Create user account
+    db.run('INSERT INTO users (username, email, password, email_verified) VALUES (?, ?, ?, ?)', 
+      [pendingReg.username, pendingReg.email, pendingReg.password_hash, 1], function(err) {
+        if (err) return res.status(500).json({ error: 'Database error.' });
+        
+        const userId = this.lastID;
+        
+        // Clean up pending registration
+        db.run('DELETE FROM pending_registrations WHERE id = ?', [pendingReg.id]);
+        
+        // Generate JWT token
+        const token = jwt.sign({ 
+          id: userId, 
+          username: pendingReg.username, 
+          email: pendingReg.email, 
+          isAdmin: false 
+        }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+        
+        res.json({ 
+          token, 
+          user: { 
+            id: userId, 
+            username: pendingReg.username, 
+            email: pendingReg.email, 
+            isAdmin: false,
+            emailVerified: true
+          },
+          message: 'User verified successfully!'
+        });
+      });
+  });
+});
