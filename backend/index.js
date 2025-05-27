@@ -529,9 +529,8 @@ app.post('/api/verify-email', (req, res) => {
               message: 'Registration completed successfully! Welcome to Rank-Anything!'
             });
           });
-      }
+      });
     });
-  });
 });
 
 // Resend verification code
