@@ -17,24 +17,7 @@ const contentFilter = new ContentFilter();
 
 // Email configuration with multiple fallbacks
 const EMAIL_CONFIGS = [
-  // Primary: 163.com with SSL (port 465)
-  {
-    name: '163.com SSL',
-    host: 'smtp.163.com',
-    port: 465,
-    secure: true,
-    auth: {
-      user: 'rank_anything@163.com',
-      pass: process.env.EMAIL_PASSWORD || 'QHDfYMBxDTyLdJVB'
-    },
-    tls: {
-      rejectUnauthorized: false
-    },
-    connectionTimeout: 30000,
-    greetingTimeout: 15000,
-    socketTimeout: 30000
-  },
-  // Fallback 1: 163.com with STARTTLS (port 587)
+  // Primary: 163.com with STARTTLS (more reliable than SSL)
   {
     name: '163.com STARTTLS',
     host: 'smtp.163.com',
@@ -45,13 +28,51 @@ const EMAIL_CONFIGS = [
       pass: process.env.EMAIL_PASSWORD || 'QHDfYMBxDTyLdJVB'
     },
     tls: {
-      rejectUnauthorized: false
+      rejectUnauthorized: false,
+      ciphers: 'SSLv3'
     },
-    connectionTimeout: 30000,
-    greetingTimeout: 15000,
-    socketTimeout: 30000
+    requireTLS: true,
+    connectionTimeout: 60000,
+    greetingTimeout: 30000,
+    socketTimeout: 60000,
+    debug: true
   },
-  // Fallback 2: Gmail (if Gmail credentials are provided)
+  // Fallback 1: 163.com with SSL (port 465)
+  {
+    name: '163.com SSL',
+    host: 'smtp.163.com',
+    port: 465,
+    secure: true,
+    auth: {
+      user: 'rank_anything@163.com',
+      pass: process.env.EMAIL_PASSWORD || 'QHDfYMBxDTyLdJVB'
+    },
+    tls: {
+      rejectUnauthorized: false,
+      servername: 'smtp.163.com'
+    },
+    connectionTimeout: 60000,
+    greetingTimeout: 30000,
+    socketTimeout: 60000,
+    debug: true
+  },
+  // Fallback 2: 163.com without TLS (last resort)
+  {
+    name: '163.com Plain',
+    host: 'smtp.163.com',
+    port: 25,
+    secure: false,
+    auth: {
+      user: 'rank_anything@163.com',
+      pass: process.env.EMAIL_PASSWORD || 'QHDfYMBxDTyLdJVB'
+    },
+    ignoreTLS: true,
+    connectionTimeout: 60000,
+    greetingTimeout: 30000,
+    socketTimeout: 60000,
+    debug: true
+  },
+  // Fallback 3: Gmail (if Gmail credentials are provided)
   {
     name: 'Gmail',
     service: 'gmail',
@@ -62,9 +83,9 @@ const EMAIL_CONFIGS = [
     tls: {
       rejectUnauthorized: false
     },
-    connectionTimeout: 30000,
-    greetingTimeout: 15000,
-    socketTimeout: 30000
+    connectionTimeout: 60000,
+    greetingTimeout: 30000,
+    socketTimeout: 60000
   }
 ];
 
@@ -104,8 +125,22 @@ function generateVerificationCode() {
   return Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit code
 }
 
+// Global flag to track email service status
+let emailServiceWorking = true;
+let lastEmailError = null;
+
 // Send verification email with multiple fallback configurations
 async function sendVerificationEmail(email, code, username) {
+  // If email service is known to be down, return early
+  if (!emailServiceWorking) {
+    console.log('Email service is disabled due to previous failures');
+    return { 
+      success: false, 
+      error: 'Email service temporarily unavailable',
+      disabled: true
+    };
+  }
+
   // Determine the sender email based on the configuration
   const getSenderEmail = (config) => {
     if (config.name === 'Gmail') {
@@ -144,19 +179,37 @@ async function sendVerificationEmail(email, code, username) {
       mailOptions.from = getSenderEmail(config);
       
       const currentTransporter = nodemailer.createTransport(config);
+      
+      // Test connection first
+      await currentTransporter.verify();
+      console.log(`Connection verified for ${config.name}`);
+      
+      // Send the email
       await currentTransporter.sendMail(mailOptions);
       
       console.log(`Email sent successfully using ${config.name}`);
+      emailServiceWorking = true; // Reset flag on success
       return { success: true, usedConfig: config.name };
     } catch (error) {
       console.error(`Email sending error with ${config.name}:`, error.message);
+      lastEmailError = error.message;
       
-      // If this is the last configuration, return the error
+      // If this is the last configuration, disable email service temporarily
       if (i === availableConfigs.length - 1) {
+        console.log('All email configurations failed, disabling email service temporarily');
+        emailServiceWorking = false;
+        
+        // Re-enable email service after 10 minutes
+        setTimeout(() => {
+          console.log('Re-enabling email service after cooldown period');
+          emailServiceWorking = true;
+        }, 10 * 60 * 1000);
+        
         return { 
           success: false, 
           error: `All email configurations failed. Last error: ${error.message}`,
-          details: error
+          details: error,
+          disabled: true
         };
       }
       
@@ -196,7 +249,34 @@ app.get('/api/email-config', (req, res) => {
       secure: config.secure
     })),
     hasEmailPassword: !!process.env.EMAIL_PASSWORD,
-    hasGmailCredentials: !!(process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD)
+    hasGmailCredentials: !!(process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD),
+    emailServiceWorking: emailServiceWorking,
+    lastEmailError: lastEmailError
+  });
+});
+
+// Email service status endpoint
+app.get('/api/email-status', (req, res) => {
+  res.json({
+    working: emailServiceWorking,
+    lastError: lastEmailError,
+    configCount: availableConfigs.length,
+    message: emailServiceWorking ? 'Email service is operational' : 'Email service is temporarily disabled'
+  });
+});
+
+// Reset email service (admin only)
+app.post('/api/admin/reset-email-service', authenticateToken, (req, res) => {
+  if (!req.user.isAdmin) {
+    return res.status(403).json({ error: 'Admin access required' });
+  }
+  
+  emailServiceWorking = true;
+  lastEmailError = null;
+  
+  res.json({
+    message: 'Email service has been reset and re-enabled',
+    working: emailServiceWorking
   });
 });
 
@@ -272,6 +352,48 @@ app.post('/api/register', validateContent, async (req, res) => {
             const emailResult = await sendVerificationEmail(email, verificationCode, username);
             if (!emailResult.success) {
               console.error('Failed to send verification email:', emailResult.error);
+              
+              // If email service is disabled, allow registration without verification
+              if (emailResult.disabled) {
+                console.log('Email service disabled, allowing registration without verification');
+                
+                // Create user account directly
+                db.run('INSERT INTO users (username, email, password, email_verified) VALUES (?, ?, ?, ?)', 
+                  [username, email, hash, 0], function(err) {
+                    if (err) {
+                      console.error('Database error during fallback registration:', err);
+                      return res.status(500).json({ error: 'Database error.' });
+                    }
+                    
+                    const userId = this.lastID;
+                    
+                    // Clean up pending registration
+                    db.run('DELETE FROM pending_registrations WHERE id = ?', [pendingUser.id]);
+                    
+                    // Generate JWT token
+                    const token = jwt.sign({ 
+                      id: userId, 
+                      username: username, 
+                      email: email, 
+                      isAdmin: false 
+                    }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+                    
+                    res.json({ 
+                      token, 
+                      user: { 
+                        id: userId, 
+                        username: username, 
+                        email: email, 
+                        isAdmin: false,
+                        emailVerified: false
+                      },
+                      message: 'Registration completed! Email verification is temporarily unavailable.',
+                      emailServiceDown: true
+                    });
+                  });
+                return;
+              }
+              
               return res.status(500).json({ 
                 error: 'Failed to send verification email. Please try again later.',
                 details: emailResult.error
@@ -299,6 +421,50 @@ app.post('/api/register', validateContent, async (req, res) => {
             const emailResult = await sendVerificationEmail(email, verificationCode, username);
             if (!emailResult.success) {
               console.error('Failed to send verification email:', emailResult.error);
+              
+              // If email service is disabled, allow registration without verification
+              if (emailResult.disabled) {
+                console.log('Email service disabled, allowing registration without verification');
+                
+                // Create user account directly
+                db.run('INSERT INTO users (username, email, password, email_verified) VALUES (?, ?, ?, ?)', 
+                  [username, email, hash, 0], function(err) {
+                    if (err) {
+                      console.error('Database error during fallback registration:', err);
+                      // Clean up pending registration
+                      db.run('DELETE FROM pending_registrations WHERE id = ?', [registrationId]);
+                      return res.status(500).json({ error: 'Database error.' });
+                    }
+                    
+                    const userId = this.lastID;
+                    
+                    // Clean up pending registration
+                    db.run('DELETE FROM pending_registrations WHERE id = ?', [registrationId]);
+                    
+                    // Generate JWT token
+                    const token = jwt.sign({ 
+                      id: userId, 
+                      username: username, 
+                      email: email, 
+                      isAdmin: false 
+                    }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+                    
+                    res.json({ 
+                      token, 
+                      user: { 
+                        id: userId, 
+                        username: username, 
+                        email: email, 
+                        isAdmin: false,
+                        emailVerified: false
+                      },
+                      message: 'Registration completed! Email verification is temporarily unavailable.',
+                      emailServiceDown: true
+                    });
+                  });
+                return;
+              }
+              
               // Remove the pending registration if email fails
               db.run('DELETE FROM pending_registrations WHERE id = ?', [registrationId]);
               return res.status(500).json({ 
