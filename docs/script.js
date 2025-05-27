@@ -259,7 +259,11 @@ async function fetchCurrentUser() {
 }
 
 function loginUser(user, token) {
-    currentUser = user;
+    // Ensure id is treated as integer for proper comparison
+    currentUser = {
+        ...user,
+        id: parseInt(user.id)
+    };
     saveAuthToken(token);
     resetDailyUsageIfNeeded();
     updateUserInterface();
@@ -292,7 +296,11 @@ async function checkUserSession() {
                 return;
             }
             
-            currentUser = payload;
+            // Ensure id is treated as integer for proper comparison
+            currentUser = {
+                ...payload,
+                id: parseInt(payload.id)
+            };
             console.log('Current user set:', currentUser);
             resetDailyUsageIfNeeded();
             updateUserInterface();
@@ -847,6 +855,15 @@ function updateTopicActions(topic) {
     if (proposeEditBtn) proposeEditBtn.remove();
     if (proposeDeleteBtn) proposeDeleteBtn.remove();
     // Show edit/delete for owner or admin
+    console.log('Permission check:', {
+        currentUser: currentUser,
+        topic_creator_id: topic.creator_id,
+        user_id: currentUser?.id,
+        isAdmin: currentUser?.isAdmin,
+        isOwner: topic.creator_id === currentUser?.id,
+        canEdit: currentUser && (currentUser.isAdmin || topic.creator_id === currentUser.id)
+    });
+    
     if (currentUser && (currentUser.isAdmin || topic.creator_id === currentUser.id)) {
         editBtn.style.display = 'inline-flex';
         deleteBtn.style.display = 'inline-flex';
@@ -1413,13 +1430,23 @@ async function updateTopic(id, name, tags) {
 
 async function deleteTopic(id) {
     const token = getAuthToken();
+    console.log('Deleting topic with ID:', id, 'Token present:', !!token);
+    
     const res = await fetch(BACKEND_URL + '/api/topics/' + id, {
         method: 'DELETE',
         headers: {
             'Authorization': 'Bearer ' + token
         }
     });
-    if (!res.ok) throw new Error('Failed to delete topic');
+    
+    console.log('Delete response status:', res.status, 'OK:', res.ok);
+    
+    if (!res.ok) {
+        const errorText = await res.text();
+        console.error('Delete topic error response:', errorText);
+        throw new Error(`Failed to delete topic: ${res.status} ${errorText}`);
+    }
+    
     return await res.json();
 }
 
@@ -4371,13 +4398,23 @@ async function editTopic() {
 }
 
 async function deleteTopicUI() {
-    if (!currentUser || !currentTopicId) return;
+    if (!currentUser || !currentTopicId) {
+        console.error('Cannot delete topic: no user or topic ID', { currentUser, currentTopicId });
+        return;
+    }
     
     try {
         const topic = await fetchTopic(currentTopicId);
-        if (!confirm(`Are you sure you want to delete the topic "${topic.name}"? This will also delete all objects and ratings within it.`)) return;
+        console.log('Fetched topic for deletion:', topic);
         
-        await deleteTopic(currentTopicId);
+        if (!confirm(`Are you sure you want to delete the topic "${topic.name}"? This will also delete all objects and ratings within it.`)) {
+            console.log('User cancelled deletion');
+            return;
+        }
+        
+        console.log('Attempting to delete topic:', currentTopicId);
+        const result = await deleteTopic(currentTopicId);
+        console.log('Delete result:', result);
         
         // Clear API cache to ensure fresh data
         clearApiCache();
@@ -4385,6 +4422,7 @@ async function deleteTopicUI() {
         showHomePage();
         showNotification('Topic deleted successfully!');
     } catch (error) {
+        console.error('Error deleting topic:', error);
         alert('Failed to delete topic: ' + error.message);
     }
 }
