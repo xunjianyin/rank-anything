@@ -2027,6 +2027,24 @@ async function renderUserSpacePage() {
                             <label for="user-space-email">Email</label>
                             <input type="email" id="user-space-email" value="${escapeHtml(currentUser.email)}" required readonly>
                         </div>
+
+                        <h3 style="margin-top: 2rem; margin-bottom: 1rem; color: #2d3748;">Change Password</h3>
+                        <div class="form-group">
+                            <label for="current-password">Current Password</label>
+                            <input type="password" id="current-password" placeholder="Enter current password">
+                        </div>
+                        <div class="form-group">
+                            <label for="new-password">New Password</label>
+                            <input type="password" id="new-password" placeholder="Enter new password">
+                            <small style="color: #718096; font-size: 0.8rem; margin-top: 0.25rem; display: block;">
+                                Password must be at least 8 characters and contain both letters and numbers
+                            </small>
+                        </div>
+                        <div class="form-group">
+                            <label for="confirm-new-password">Confirm New Password</label>
+                            <input type="password" id="confirm-new-password" placeholder="Confirm new password">
+                        </div>
+                        
                         <div class="form-actions">
                             <button type="submit" class="btn btn-primary">Update Profile</button>
                         </div>
