@@ -2513,4 +2513,298 @@ body {
     .search-suggestion:hover {
         background: #374151;
     }
+}
+
+/* Introduction Page Styles */
+.introduction-container {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 2rem;
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+    font-family: 'Inter', sans-serif;
+    line-height: 1.8;
+}
+
+.introduction-header {
+    text-align: center;
+    margin-bottom: 3rem;
+    padding-bottom: 2rem;
+    border-bottom: 2px solid #e2e8f0;
+}
+
+.introduction-header h1 {
+    font-size: 2.5rem;
+    font-weight: 700;
+    color: #2d3748;
+    margin-bottom: 0.5rem;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.introduction-subtitle {
+    font-size: 1.2rem;
+    color: #718096;
+    font-weight: 400;
+}
+
+.introduction-content {
+    margin-bottom: 3rem;
+}
+
+.philosophy-section,
+.features-section,
+.dedication-section,
+.acknowledgments-section,
+.author-section {
+    margin-bottom: 3rem;
+}
+
+.philosophy-section h2,
+.features-section h2,
+.dedication-section h2,
+.acknowledgments-section h2 {
+    font-size: 1.8rem;
+    font-weight: 600;
+    color: #2d3748;
+    margin-bottom: 1.5rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.philosophy-text {
+    font-size: 1.1rem;
+    line-height: 2;
+    color: #4a5568;
+    text-align: center;
+    padding: 2rem;
+    background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
+    border-radius: 12px;
+    border-left: 4px solid #667eea;
+    font-style: italic;
+}
+
+.philosophy-text p {
+    margin: 0.5rem 0;
+}
+
+.features-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 1.5rem;
+    margin-top: 2rem;
+}
+
+.feature-card {
+    padding: 1.5rem;
+    background: #f8fafc;
+    border-radius: 12px;
+    border: 1px solid #e2e8f0;
+    transition: all 0.3s ease;
+    text-align: center;
+}
+
+.feature-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+    border-color: #667eea;
+}
+
+.feature-card i {
+    font-size: 2.5rem;
+    color: #667eea;
+    margin-bottom: 1rem;
+}
+
+.feature-card h3 {
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: #2d3748;
+    margin-bottom: 0.8rem;
+}
+
+.feature-card p {
+    color: #718096;
+    font-size: 0.95rem;
+    line-height: 1.6;
+}
+
+.dedication-content,
+.acknowledgments-content {
+    font-size: 1.05rem;
+    color: #4a5568;
+    line-height: 1.8;
+    padding: 1.5rem;
+    background: #f7fafc;
+    border-radius: 8px;
+    border-left: 4px solid #764ba2;
+}
+
+.dedication-content a {
+    color: #667eea;
+    text-decoration: none;
+    font-weight: 500;
+    border-bottom: 1px solid transparent;
+    transition: border-color 0.2s ease;
+}
+
+.dedication-content a:hover {
+    border-bottom-color: #667eea;
+}
+
+.acknowledgments-content {
+    border-left-color: #38b2ac;
+    text-align: center;
+    font-style: italic;
+}
+
+.author-section {
+    text-align: center;
+    margin-top: 3rem;
+}
+
+.author-info {
+    padding: 1rem;
+}
+
+.author-signature {
+    font-size: 1.1rem;
+    color: #2d3748;
+    font-weight: 500;
+    margin-bottom: 0.5rem;
+}
+
+.creation-date {
+    font-size: 0.95rem;
+    color: #718096;
+    font-style: italic;
+}
+
+.introduction-footer {
+    text-align: center;
+    padding-top: 2rem;
+    border-top: 1px solid #e2e8f0;
+}
+
+/* Introduction Button (Fixed at bottom) */
+.introduction-button-container {
+    position: fixed;
+    bottom: 2rem;
+    right: 2rem;
+    z-index: 999;
+}
+
+.introduction-button {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1.25rem;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border: none;
+    border-radius: 25px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+    transition: all 0.3s ease;
+    backdrop-filter: blur(10px);
+}
+
+.introduction-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+}
+
+.introduction-button:active {
+    transform: translateY(0);
+}
+
+.introduction-button i {
+    font-size: 1rem;
+}
+
+/* Responsive Design for Introduction Page */
+@media (max-width: 768px) {
+    .introduction-container {
+        margin: 1rem;
+        padding: 1.5rem;
+    }
+    
+    .introduction-header h1 {
+        font-size: 2rem;
+    }
+    
+    .introduction-subtitle {
+        font-size: 1rem;
+    }
+    
+    .features-grid {
+        grid-template-columns: 1fr;
+        gap: 1rem;
+    }
+    
+    .feature-card {
+        padding: 1.25rem;
+    }
+    
+    .philosophy-text {
+        padding: 1.5rem;
+        font-size: 1rem;
+    }
+    
+    .introduction-button-container {
+        bottom: 1rem;
+        right: 1rem;
+    }
+    
+    .introduction-button {
+        padding: 0.6rem 1rem;
+        font-size: 0.85rem;
+    }
+    
+    .introduction-button span {
+        display: none;
+    }
+}
+
+@media (max-width: 480px) {
+    .introduction-container {
+        margin: 0.5rem;
+        padding: 1rem;
+    }
+    
+    .introduction-header {
+        margin-bottom: 2rem;
+        padding-bottom: 1.5rem;
+    }
+    
+    .introduction-header h1 {
+        font-size: 1.8rem;
+    }
+    
+    .philosophy-section h2,
+    .features-section h2,
+    .dedication-section h2,
+    .acknowledgments-section h2 {
+        font-size: 1.5rem;
+    }
+    
+    .feature-card i {
+        font-size: 2rem;
+    }
+    
+    .philosophy-text {
+        padding: 1rem;
+        font-size: 0.95rem;
+    }
+    
+    .dedication-content,
+    .acknowledgments-content {
+        padding: 1rem;
+        font-size: 1rem;
+    }
 } 

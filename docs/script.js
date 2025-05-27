@@ -769,6 +769,15 @@ function showProposalsPage() {
     toggleUserMenu(); // Close the dropdown
 }
 
+function showIntroductionPage() {
+    currentPage = 'introduction';
+    
+    hideAllPages();
+    document.getElementById('introduction-page').classList.add('active');
+    
+    updateBreadcrumb();
+}
+
 function hideAllPages() {
     document.querySelectorAll('.page').forEach(page => {
         page.classList.remove('active');
@@ -802,6 +811,8 @@ async function updateBreadcrumb() {
         html = `<a href="#" onclick="showHomePage()">Topics</a> > Search Results`;
     } else if (currentPage === 'proposals') {
         html = `<a href="#" onclick="showHomePage()">Topics</a> > Pending Proposals`;
+    } else if (currentPage === 'introduction') {
+        html = `<a href="#" onclick="showHomePage()">Topics</a> > 关于本站`;
     }
     
     breadcrumb.innerHTML = html;
