@@ -847,6 +847,11 @@ async function updateBreadcrumb() {
 function updateTopicActions(topic) {
     const editBtn = document.getElementById('edit-topic-btn');
     const deleteBtn = document.getElementById('delete-topic-btn');
+    
+    // Remove any previous event listeners to avoid duplicates
+    deleteBtn.replaceWith(deleteBtn.cloneNode(true));
+    const newDeleteBtn = document.getElementById('delete-topic-btn');
+    
     // Remove any previous propose buttons
     const proposeEditBtnId = 'propose-edit-topic-btn';
     const proposeDeleteBtnId = 'propose-delete-topic-btn';
@@ -854,6 +859,7 @@ function updateTopicActions(topic) {
     let proposeDeleteBtn = document.getElementById(proposeDeleteBtnId);
     if (proposeEditBtn) proposeEditBtn.remove();
     if (proposeDeleteBtn) proposeDeleteBtn.remove();
+    
     // Show edit/delete for owner or admin
     console.log('Permission check:', {
         currentUser: currentUser,
@@ -866,10 +872,32 @@ function updateTopicActions(topic) {
     
     if (currentUser && (currentUser.isAdmin || topic.creator_id === currentUser.id)) {
         editBtn.style.display = 'inline-flex';
-        deleteBtn.style.display = 'inline-flex';
+        newDeleteBtn.style.display = 'inline-flex';
+        
+        // Add debounced delete event listener
+        let deleteInProgress = false;
+        newDeleteBtn.addEventListener('click', async function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            if (deleteInProgress) {
+                console.log('Delete already in progress, ignoring click');
+                return;
+            }
+            
+            deleteInProgress = true;
+            newDeleteBtn.disabled = true;
+            
+            try {
+                await deleteTopicUI();
+            } finally {
+                deleteInProgress = false;
+                newDeleteBtn.disabled = false;
+            }
+        });
     } else {
         editBtn.style.display = 'none';
-        deleteBtn.style.display = 'none';
+        newDeleteBtn.style.display = 'none';
         // Show propose buttons for logged-in users who are not owner or admin
         if (currentUser) {
             // Insert after editBtn and deleteBtn
@@ -913,7 +941,7 @@ function updateTopicActions(topic) {
                     alert('Failed to create proposal: ' + error.message);
                 }
             };
-            deleteBtn.parentNode.insertBefore(proposeDeleteBtn, deleteBtn.nextSibling);
+            newDeleteBtn.parentNode.insertBefore(proposeDeleteBtn, newDeleteBtn.nextSibling);
         }
     }
 }
@@ -921,6 +949,11 @@ function updateTopicActions(topic) {
 function updateObjectActions(object) {
     const editBtn = document.getElementById('edit-object-btn');
     const deleteBtn = document.getElementById('delete-object-btn');
+    
+    // Remove any previous event listeners to avoid duplicates
+    deleteBtn.replaceWith(deleteBtn.cloneNode(true));
+    const newDeleteBtn = document.getElementById('delete-object-btn');
+    
     // Remove any previous propose buttons
     const proposeEditBtnId = 'propose-edit-object-btn';
     const proposeDeleteBtnId = 'propose-delete-object-btn';
@@ -928,13 +961,36 @@ function updateObjectActions(object) {
     let proposeDeleteBtn = document.getElementById(proposeDeleteBtnId);
     if (proposeEditBtn) proposeEditBtn.remove();
     if (proposeDeleteBtn) proposeDeleteBtn.remove();
+    
     // Show edit/delete for owner or admin
     if (currentUser && (currentUser.isAdmin || object.creator_id === currentUser.id)) {
         editBtn.style.display = 'inline-flex';
-        deleteBtn.style.display = 'inline-flex';
+        newDeleteBtn.style.display = 'inline-flex';
+        
+        // Add debounced delete event listener
+        let deleteInProgress = false;
+        newDeleteBtn.addEventListener('click', async function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            if (deleteInProgress) {
+                console.log('Object delete already in progress, ignoring click');
+                return;
+            }
+            
+            deleteInProgress = true;
+            newDeleteBtn.disabled = true;
+            
+            try {
+                await deleteObjectUI();
+            } finally {
+                deleteInProgress = false;
+                newDeleteBtn.disabled = false;
+            }
+        });
     } else {
         editBtn.style.display = 'none';
-        deleteBtn.style.display = 'none';
+        newDeleteBtn.style.display = 'none';
         // Show propose buttons for logged-in users who are not owner or admin
         if (currentUser) {
             proposeEditBtn = document.createElement('button');
@@ -973,7 +1029,7 @@ function updateObjectActions(object) {
                     alert('Failed to create proposal: ' + error.message);
                 }
             };
-            deleteBtn.parentNode.insertBefore(proposeDeleteBtn, deleteBtn.nextSibling);
+            newDeleteBtn.parentNode.insertBefore(proposeDeleteBtn, newDeleteBtn.nextSibling);
         }
     }
 }
@@ -4407,6 +4463,12 @@ async function deleteTopicUI() {
         const topic = await fetchTopic(currentTopicId);
         console.log('Fetched topic for deletion:', topic);
         
+        // Check if user has permission
+        if (!currentUser.isAdmin && topic.creator_id !== currentUser.id) {
+            alert('You do not have permission to delete this topic.');
+            return;
+        }
+        
         if (!confirm(`Are you sure you want to delete the topic "${topic.name}"? This will also delete all objects and ratings within it.`)) {
             console.log('User cancelled deletion');
             return;
@@ -4423,7 +4485,14 @@ async function deleteTopicUI() {
         showNotification('Topic deleted successfully!');
     } catch (error) {
         console.error('Error deleting topic:', error);
-        alert('Failed to delete topic: ' + error.message);
+        if (error.message.includes('permission') || error.message.includes('403')) {
+            alert('You do not have permission to delete this topic.');
+        } else if (error.message.includes('404')) {
+            alert('Topic not found. It may have already been deleted.');
+            showHomePage();
+        } else {
+            alert('Failed to delete topic: ' + error.message);
+        }
     }
 }
 
@@ -4432,12 +4501,12 @@ window.showAddTopicForm = showAddTopicForm;
 window.hideAddTopicForm = hideAddTopicForm;
 window.addTopic = addTopic;
 window.editTopic = editTopic;
-window.deleteTopic = deleteTopicUI;
+// Removed window.deleteTopic mapping - now handled via event listeners
 window.showAddObjectForm = showAddObjectForm;
 window.hideAddObjectForm = hideAddObjectForm;
 window.addObject = addObject;
 window.editObject = editObject;
-window.deleteObject = deleteObjectUI;
+// Removed window.deleteObject mapping - now handled via event listeners
 window.showUserProfilePage = showUserProfilePage;
 window.rateUserUI = rateUserUI;
 window.removeUserRatingUI = removeUserRatingUI;
