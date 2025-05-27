@@ -2279,8 +2279,11 @@ async function updateUserInfo(event) {
             showNotification('Profile updated successfully!');
         }
         
-        // Refresh the user space page to show updated stats
-        await renderUserSpacePage();
+        // Refresh the user space page to show updated stats (only if currently visible)
+        const userSpacePage = document.getElementById('user-space-page');
+        if (userSpacePage && userSpacePage.classList.contains('active')) {
+            await renderUserSpacePage();
+        }
         
     } catch (error) {
         alert('Failed to update profile: ' + error.message);
