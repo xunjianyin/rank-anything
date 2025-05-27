@@ -573,9 +573,69 @@ function recordEditHistory(targetType, targetId, editorId, actionType, oldValue 
 // --- Topic Endpoints ---
 // List all topics
 app.get('/api/topics', (req, res) => {
-  db.all('SELECT t.*, u.username as creator_username FROM topics t LEFT JOIN users u ON t.creator_id = u.id ORDER BY t.created_at DESC', [], (err, rows) => {
+  const { page = 1, limit = 20, search, sortBy = 'created_at', sortOrder = 'DESC' } = req.query;
+  const offset = (page - 1) * limit;
+  
+  // Validate sort parameters
+  const validSortFields = ['name', 'created_at', 'object_count'];
+  const validSortOrders = ['ASC', 'DESC'];
+  const safeSortBy = validSortFields.includes(sortBy) ? sortBy : 'created_at';
+  const safeSortOrder = validSortOrders.includes(sortOrder.toUpperCase()) ? sortOrder.toUpperCase() : 'DESC';
+  
+  let sql = `
+    SELECT t.*, u.username as creator_username,
+           (SELECT COUNT(*) FROM objects WHERE topic_id = t.id) as object_count
+    FROM topics t 
+    LEFT JOIN users u ON t.creator_id = u.id
+  `;
+  
+  let countSql = 'SELECT COUNT(*) as total FROM topics t';
+  let params = [];
+  let countParams = [];
+  
+  // Add search functionality
+  if (search && search.trim()) {
+    const searchTerm = `%${search.trim()}%`;
+    sql += ' WHERE t.name LIKE ?';
+    countSql += ' WHERE t.name LIKE ?';
+    params.push(searchTerm);
+    countParams.push(searchTerm);
+  }
+  
+  // Add sorting
+  if (safeSortBy === 'object_count') {
+    sql += ` ORDER BY object_count ${safeSortOrder}, t.created_at DESC`;
+  } else {
+    sql += ` ORDER BY t.${safeSortBy} ${safeSortOrder}`;
+  }
+  
+  // Add pagination
+  sql += ' LIMIT ? OFFSET ?';
+  params.push(parseInt(limit), offset);
+  
+  // Get total count for pagination
+  db.get(countSql, countParams, (err, countResult) => {
     if (err) return res.status(500).json({ error: 'Database error.' });
-    res.json(rows);
+    
+    const total = countResult.total;
+    const totalPages = Math.ceil(total / limit);
+    
+    // Get paginated results
+    db.all(sql, params, (err, rows) => {
+      if (err) return res.status(500).json({ error: 'Database error.' });
+      
+      res.json({
+        topics: rows,
+        pagination: {
+          currentPage: parseInt(page),
+          totalPages,
+          totalItems: total,
+          itemsPerPage: parseInt(limit),
+          hasNext: page < totalPages,
+          hasPrev: page > 1
+        }
+      });
+    });
   });
 });
 
@@ -850,9 +910,58 @@ app.delete('/api/topics/:id', authenticateToken, async (req, res) => {
 // List objects in a topic
 app.get('/api/topics/:topicId/objects', (req, res) => {
   const topicId = req.params.topicId;
-  db.all('SELECT o.*, u.username as creator_username FROM objects o LEFT JOIN users u ON o.creator_id = u.id WHERE o.topic_id = ? ORDER BY o.created_at DESC', [topicId], (err, rows) => {
+  const { page = 1, limit = 20, sortBy = 'created_at', sortOrder = 'DESC' } = req.query;
+  const offset = (page - 1) * limit;
+  
+  const validSortFields = ['name', 'created_at', 'avg_rating'];
+  const validSortOrders = ['ASC', 'DESC'];
+  const safeSortBy = validSortFields.includes(sortBy) ? sortBy : 'created_at';
+  const safeSortOrder = validSortOrders.includes(sortOrder.toUpperCase()) ? sortOrder.toUpperCase() : 'DESC';
+  
+  let sql = `
+    SELECT o.*, u.username as creator_username,
+           COALESCE(AVG(r.rating), 0) as avg_rating,
+           COUNT(r.id) as rating_count
+    FROM objects o 
+    LEFT JOIN users u ON o.creator_id = u.id
+    LEFT JOIN ratings r ON o.id = r.object_id
+    WHERE o.topic_id = ?
+    GROUP BY o.id, o.name, o.creator_id, o.created_at, u.username
+  `;
+  
+  // Add sorting
+  if (safeSortBy === 'avg_rating') {
+    sql += ` ORDER BY avg_rating ${safeSortOrder}, o.created_at DESC`;
+  } else {
+    sql += ` ORDER BY o.${safeSortBy} ${safeSortOrder}`;
+  }
+  
+  sql += ' LIMIT ? OFFSET ?';
+  
+  // Get total count
+  const countSql = 'SELECT COUNT(*) as total FROM objects WHERE topic_id = ?';
+  
+  db.get(countSql, [topicId], (err, countResult) => {
     if (err) return res.status(500).json({ error: 'Database error.' });
-    res.json(rows);
+    
+    const total = countResult.total;
+    const totalPages = Math.ceil(total / limit);
+    
+    db.all(sql, [topicId, parseInt(limit), offset], (err, rows) => {
+      if (err) return res.status(500).json({ error: 'Database error.' });
+      
+      res.json({
+        objects: rows,
+        pagination: {
+          currentPage: parseInt(page),
+          totalPages,
+          totalItems: total,
+          itemsPerPage: parseInt(limit),
+          hasNext: page < totalPages,
+          hasPrev: page > 1
+        }
+      });
+    });
   });
 });
 // Create an object in a topic
@@ -1983,4 +2092,265 @@ app.listen(PORT, () => {
   console.log(`Health check: http://localhost:${PORT}/api/health`);
   console.log(`Email test: POST http://localhost:${PORT}/api/test-email`);
   console.log('=====================================\n');
+  
+  // Initialize database indexes for better performance
+  addDatabaseIndexes();
 }); 
+
+// Optimized search endpoint with server-side processing
+app.get('/api/search', (req, res) => {
+  const { q: query, type = 'all', page = 1, limit = 20, tags, tagLogic = 'and' } = req.query;
+  const offset = (page - 1) * limit;
+  
+  if (!query && !tags) {
+    return res.status(400).json({ error: 'Search query or tags required.' });
+  }
+  
+  const results = {};
+  const promises = [];
+  
+  if (type === 'all' || type === 'topics') {
+    promises.push(searchTopicsOptimized(query, tags, tagLogic, limit, offset, page).then(data => {
+      results.topics = data;
+    }));
+  }
+  
+  if (type === 'all' || type === 'objects') {
+    promises.push(searchObjectsOptimized(query, tags, tagLogic, limit, offset, page).then(data => {
+      results.objects = data;
+    }));
+  }
+  
+  Promise.all(promises)
+    .then(() => {
+      res.json(results);
+    })
+    .catch(error => {
+      console.error('Search error:', error);
+      res.status(500).json({ error: 'Search failed.' });
+    });
+});
+
+// Optimized search functions
+async function searchTopicsOptimized(query, tags, tagLogic, limit, offset, page) {
+  return new Promise((resolve, reject) => {
+    let sql = `
+      SELECT DISTINCT t.*, u.username as creator_username,
+             (SELECT COUNT(*) FROM objects WHERE topic_id = t.id) as object_count
+      FROM topics t 
+      LEFT JOIN users u ON t.creator_id = u.id
+    `;
+    
+    let countSql = 'SELECT COUNT(DISTINCT t.id) as total FROM topics t';
+    let whereConditions = [];
+    let params = [];
+    
+    // Text search
+    if (query && query.trim()) {
+      whereConditions.push('t.name LIKE ?');
+      params.push(`%${query.trim()}%`);
+    }
+    
+    // Tag search
+    if (tags) {
+      const tagArray = tags.split(',').map(tag => tag.trim()).filter(tag => tag);
+      if (tagArray.length > 0) {
+        sql += ` LEFT JOIN topic_tags tt ON t.id = tt.topic_id
+                 LEFT JOIN tags tag ON tt.tag_id = tag.id`;
+        countSql += ` LEFT JOIN topic_tags tt ON t.id = tt.topic_id
+                      LEFT JOIN tags tag ON tt.tag_id = tag.id`;
+        
+        if (tagLogic === 'and') {
+          // All tags must match
+          const tagConditions = tagArray.map(() => 'tag.name LIKE ?').join(' OR ');
+          whereConditions.push(`t.id IN (
+            SELECT tt2.topic_id FROM topic_tags tt2 
+            JOIN tags tag2 ON tt2.tag_id = tag2.id 
+            WHERE ${tagConditions}
+            GROUP BY tt2.topic_id 
+            HAVING COUNT(DISTINCT tag2.id) = ?
+          )`);
+          params.push(...tagArray.map(tag => `%${tag}%`), tagArray.length);
+        } else {
+          // Any tag matches
+          const tagConditions = tagArray.map(() => 'tag.name LIKE ?').join(' OR ');
+          whereConditions.push(`(${tagConditions})`);
+          params.push(...tagArray.map(tag => `%${tag}%`));
+        }
+      }
+    }
+    
+    // Build WHERE clause
+    if (whereConditions.length > 0) {
+      const whereClause = ` WHERE ${whereConditions.join(' AND ')}`;
+      sql += whereClause;
+      countSql += whereClause;
+    }
+    
+    sql += ' ORDER BY t.created_at DESC LIMIT ? OFFSET ?';
+    params.push(parseInt(limit), offset);
+    
+    // Get count first
+    const countParams = params.slice(0, -2);
+    db.get(countSql, countParams, (err, countResult) => {
+      if (err) return reject(err);
+      
+      const total = countResult.total;
+      const totalPages = Math.ceil(total / limit);
+      
+      // Get results
+      db.all(sql, params, (err, rows) => {
+        if (err) return reject(err);
+        
+        resolve({
+          items: rows,
+          pagination: {
+            currentPage: parseInt(page),
+            totalPages,
+            totalItems: total,
+            itemsPerPage: parseInt(limit),
+            hasNext: page < totalPages,
+            hasPrev: page > 1
+          }
+        });
+      });
+    });
+  });
+}
+
+async function searchObjectsOptimized(query, tags, tagLogic, limit, offset, page) {
+  return new Promise((resolve, reject) => {
+    let sql = `
+      SELECT DISTINCT o.*, u.username as creator_username, t.name as topic_name,
+             COALESCE(AVG(r.rating), 0) as avg_rating,
+             COUNT(r.id) as rating_count
+      FROM objects o 
+      LEFT JOIN users u ON o.creator_id = u.id
+      LEFT JOIN topics t ON o.topic_id = t.id
+      LEFT JOIN ratings r ON o.id = r.object_id
+    `;
+    
+    let countSql = `
+      SELECT COUNT(DISTINCT o.id) as total 
+      FROM objects o 
+      LEFT JOIN topics t ON o.topic_id = t.id
+    `;
+    
+    let whereConditions = [];
+    let params = [];
+    
+    // Text search
+    if (query && query.trim()) {
+      whereConditions.push('(o.name LIKE ? OR t.name LIKE ?)');
+      params.push(`%${query.trim()}%`, `%${query.trim()}%`);
+    }
+    
+    // Tag search
+    if (tags) {
+      const tagArray = tags.split(',').map(tag => tag.trim()).filter(tag => tag);
+      if (tagArray.length > 0) {
+        sql += ` LEFT JOIN object_tags ot ON o.id = ot.object_id
+                 LEFT JOIN tags tag ON ot.tag_id = tag.id`;
+        countSql += ` LEFT JOIN object_tags ot ON o.id = ot.object_id
+                      LEFT JOIN tags tag ON ot.tag_id = tag.id`;
+        
+        if (tagLogic === 'and') {
+          const tagConditions = tagArray.map(() => 'tag.name LIKE ?').join(' OR ');
+          whereConditions.push(`o.id IN (
+            SELECT ot2.object_id FROM object_tags ot2 
+            JOIN tags tag2 ON ot2.tag_id = tag2.id 
+            WHERE ${tagConditions}
+            GROUP BY ot2.object_id 
+            HAVING COUNT(DISTINCT tag2.id) = ?
+          )`);
+          params.push(...tagArray.map(tag => `%${tag}%`), tagArray.length);
+        } else {
+          const tagConditions = tagArray.map(() => 'tag.name LIKE ?').join(' OR ');
+          whereConditions.push(`(${tagConditions})`);
+          params.push(...tagArray.map(tag => `%${tag}%`));
+        }
+      }
+    }
+    
+    // Build WHERE clause
+    if (whereConditions.length > 0) {
+      const whereClause = ` WHERE ${whereConditions.join(' AND ')}`;
+      sql += whereClause;
+      countSql += whereClause;
+    }
+    
+    sql += ' GROUP BY o.id ORDER BY avg_rating DESC, o.created_at DESC LIMIT ? OFFSET ?';
+    params.push(parseInt(limit), offset);
+    
+    // Get count
+    const countParams = params.slice(0, -2);
+    db.get(countSql, countParams, (err, countResult) => {
+      if (err) return reject(err);
+      
+      const total = countResult.total;
+      const totalPages = Math.ceil(total / limit);
+      
+      // Get results
+      db.all(sql, params, (err, rows) => {
+        if (err) return reject(err);
+        
+        resolve({
+          items: rows,
+          pagination: {
+            currentPage: parseInt(page),
+            totalPages,
+            totalItems: total,
+            itemsPerPage: parseInt(limit),
+            hasNext: page < totalPages,
+            hasPrev: page > 1
+          }
+        });
+      });
+    });
+  });
+}
+
+// Cache control headers middleware for better performance
+app.use((req, res, next) => {
+  // Set cache headers for static data
+  if (req.method === 'GET') {
+    if (req.path.includes('/api/topics') || 
+        req.path.includes('/api/objects') ||
+        req.path.includes('/api/tags')) {
+      res.set('Cache-Control', 'public, max-age=300'); // 5 minutes cache
+    } else if (req.path.includes('/api/search')) {
+      res.set('Cache-Control', 'public, max-age=180'); // 3 minutes cache for search
+    } else if (req.path.includes('/api/ratings')) {
+      res.set('Cache-Control', 'public, max-age=60'); // 1 minute cache for dynamic content
+    }
+  }
+  next();
+});
+
+// Add database indexing on startup for better query performance
+const addDatabaseIndexes = () => {
+  const indexes = [
+    'CREATE INDEX IF NOT EXISTS idx_topics_name ON topics(name)',
+    'CREATE INDEX IF NOT EXISTS idx_topics_created_at ON topics(created_at)',
+    'CREATE INDEX IF NOT EXISTS idx_objects_topic_id ON objects(topic_id)',
+    'CREATE INDEX IF NOT EXISTS idx_objects_name ON objects(name)',
+    'CREATE INDEX IF NOT EXISTS idx_objects_created_at ON objects(created_at)',
+    'CREATE INDEX IF NOT EXISTS idx_ratings_object_id ON ratings(object_id)',
+    'CREATE INDEX IF NOT EXISTS idx_ratings_user_id ON ratings(user_id)',
+    'CREATE INDEX IF NOT EXISTS idx_ratings_created_at ON ratings(created_at)',
+    'CREATE INDEX IF NOT EXISTS idx_topic_tags_topic_id ON topic_tags(topic_id)',
+    'CREATE INDEX IF NOT EXISTS idx_object_tags_object_id ON object_tags(object_id)',
+    'CREATE INDEX IF NOT EXISTS idx_tags_name ON tags(name)',
+    'CREATE INDEX IF NOT EXISTS idx_edit_history_target ON edit_history(target_type, target_id)'
+  ];
+  
+  indexes.forEach(indexSql => {
+    db.run(indexSql, (err) => {
+      if (err) {
+        console.log(`Index creation warning: ${err.message}`);
+      }
+    });
+  });
+  
+  console.log('Database indexes initialized for better performance');
+}; 

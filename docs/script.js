@@ -4419,3 +4419,383 @@ window.testContent = testContent;
 window.viewCategoryWords = viewCategoryWords;
 window.addWordsToCategory = addWordsToCategory;
 window.removeWordsFromCategory = removeWordsFromCategory;
+
+// Add debounced search and pagination support
+let searchTimeout;
+let currentSearchPage = 1;
+let searchPagination = null;
+const SEARCH_DEBOUNCE_DELAY = 300;
+const apiCache = new Map();
+const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+
+// Enhanced API fetch with caching
+async function cachedFetch(url, options = {}) {
+    const cacheKey = `${url}${JSON.stringify(options)}`;
+    const cached = apiCache.get(cacheKey);
+    
+    if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
+        return cached.data;
+    }
+    
+    const response = await fetch(url, {
+        headers: {
+            'Content-Type': 'application/json',
+            ...(currentUser?.token && { 'Authorization': `Bearer ${currentUser.token}` }),
+            ...options.headers
+        },
+        ...options
+    });
+    
+    if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    
+    // Cache GET requests only
+    if (!options.method || options.method === 'GET') {
+        apiCache.set(cacheKey, {
+            data,
+            timestamp: Date.now()
+        });
+        
+        // Clean old cache entries
+        if (apiCache.size > 100) {
+            const oldestEntries = Array.from(apiCache.entries())
+                .sort((a, b) => a[1].timestamp - b[1].timestamp)
+                .slice(0, 20);
+            oldestEntries.forEach(([key]) => apiCache.delete(key));
+        }
+    }
+    
+    return data;
+}
+
+// Debounced search function
+function debounceSearch() {
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(() => {
+        const query = document.getElementById('search-input').value.trim();
+        if (query.length >= 2) {
+            performOptimizedSearch();
+        } else if (query.length === 0) {
+            // Clear search results if query is empty
+            currentSearchResults = { topics: [], objects: [] };
+            if (currentPage === 'search') {
+                showHomePage();
+            }
+        }
+    }, SEARCH_DEBOUNCE_DELAY);
+}
+
+// Enhanced search with server-side processing
+async function performOptimizedSearch(page = 1) {
+    const query = document.getElementById('search-input').value.trim();
+    const searchType = document.getElementById('search-type').value;
+    const tagInput = document.getElementById('tag-search-input').value.trim();
+    const tagLogic = document.getElementById('tag-search-logic').value;
+    
+    if (!query && !tagInput) {
+        alert('Please enter a search term or tag filters');
+        return;
+    }
+    
+    currentSearchPage = page;
+    
+    try {
+        // Show loading state
+        if (page === 1) {
+            await showSearchPage(query, searchType, tagInput ? tagInput.split(/[,，;；、]/).map(t => t.trim()).filter(t => t) : null, tagLogic);
+        }
+        
+        // Build search URL
+        const searchParams = new URLSearchParams({
+            q: query || '',
+            type: searchType,
+            page: page.toString(),
+            limit: '20'
+        });
+        
+        if (tagInput) {
+            searchParams.append('tags', tagInput);
+            searchParams.append('tagLogic', tagLogic);
+        }
+        
+        const searchData = await cachedFetch(`${API_BASE}/search?${searchParams}`);
+        
+        if (page === 1) {
+            currentSearchResults = searchData;
+            searchPagination = searchData.topics?.pagination || searchData.objects?.pagination;
+        } else {
+            // Append results for pagination
+            if (searchData.topics) {
+                currentSearchResults.topics.items = [
+                    ...(currentSearchResults.topics.items || []),
+                    ...searchData.topics.items
+                ];
+                currentSearchResults.topics.pagination = searchData.topics.pagination;
+            }
+            if (searchData.objects) {
+                currentSearchResults.objects.items = [
+                    ...(currentSearchResults.objects.items || []),
+                    ...searchData.objects.items
+                ];
+                currentSearchResults.objects.pagination = searchData.objects.pagination;
+            }
+        }
+        
+        await renderOptimizedSearchResults(query, searchType, tagInput, tagLogic);
+        
+    } catch (error) {
+        console.error('Search error:', error);
+        // Show error message
+        const searchTitle = document.getElementById('search-title');
+        if (searchTitle) {
+            searchTitle.textContent = 'Search Error';
+        }
+    }
+}
+
+// Optimized search results rendering
+async function renderOptimizedSearchResults(query, searchType, tagInput, tagLogic) {
+    const searchTitle = document.getElementById('search-title');
+    const searchInfo = document.getElementById('search-info');
+    const topicsSection = document.getElementById('topics-results-section');
+    const objectsSection = document.getElementById('objects-results-section');
+    const noResults = document.getElementById('no-search-results');
+    
+    // Update title and info
+    searchTitle.textContent = 'Search Results';
+    
+    let infoText = '';
+    if (query && tagInput) {
+        infoText = `Searching for "${query}" with tags: ${tagInput} (${tagLogic.toUpperCase()})`;
+    } else if (query) {
+        infoText = `Searching for "${query}"`;
+    } else if (tagInput) {
+        infoText = `Filtered by tags: ${tagInput} (${tagLogic.toUpperCase()})`;
+    }
+    
+    if (searchType !== 'all') {
+        infoText += ` in ${searchType}`;
+    }
+    
+    searchInfo.textContent = infoText;
+    
+    // Hide all sections initially
+    topicsSection.style.display = 'none';
+    objectsSection.style.display = 'none';
+    noResults.style.display = 'none';
+    
+    let hasResults = false;
+    
+    // Render topics results
+    if (currentSearchResults.topics?.items?.length > 0) {
+        hasResults = true;
+        topicsSection.style.display = 'block';
+        await renderSearchTopicsOptimized();
+    }
+    
+    // Render objects results
+    if (currentSearchResults.objects?.items?.length > 0) {
+        hasResults = true;
+        objectsSection.style.display = 'block';
+        await renderSearchObjectsOptimized();
+    }
+    
+    // Show no results message if needed
+    if (!hasResults) {
+        noResults.style.display = 'block';
+    }
+}
+
+// Optimized topic search rendering
+async function renderSearchTopicsOptimized() {
+    const grid = document.getElementById('search-topics-grid');
+    
+    try {
+        const topics = currentSearchResults.topics.items || [];
+        const pagination = currentSearchResults.topics.pagination;
+        
+        // Render search topics with editors display
+        const topicCards = await Promise.all(topics.map(async (topic) => {
+            const editorsDisplay = await renderEditorsDisplay('topic', topic.id, topic.creator_username || '', topic.creator_id);
+            return `
+                <div class="topic-card" onclick="showTopicPage('${topic.id}')">
+                    <div class="card-owner">${editorsDisplay}</div>
+                    <h3>${escapeHtml(topic.name)}</h3>
+                    <p class="rating-text">${topic.object_count} item${topic.object_count !== 1 ? 's' : ''}</p>
+                </div>
+            `;
+        }));
+        
+        let html = topicCards.join('');
+        
+        // Add pagination controls
+        if (pagination && pagination.totalPages > 1) {
+            html += renderPaginationControls('topics', pagination);
+        }
+        
+        grid.innerHTML = html;
+    } catch (error) {
+        console.error('Error rendering search topics:', error);
+        grid.innerHTML = '<div class="error">Failed to load topic results</div>';
+    }
+}
+
+// Optimized object search rendering
+async function renderSearchObjectsOptimized() {
+    const grid = document.getElementById('search-objects-grid');
+    
+    try {
+        const objects = currentSearchResults.objects.items || [];
+        const pagination = currentSearchResults.objects.pagination;
+        
+        // Render search objects with ratings and tags
+        const objectCards = await Promise.all(objects.map(async (object) => {
+            const editorsDisplay = await renderEditorsDisplay('object', object.id, object.creator_username || '', object.creator_id);
+            
+            // Fetch tags for each object (with caching)
+            let tags = [];
+            try {
+                tags = await fetchObjectTags(object.id);
+            } catch (error) {
+                console.error(`Error fetching tags for object ${object.id}:`, error);
+            }
+            
+            return `
+                <div class="object-card" onclick="showObjectFromSearch('${object.topic_id || object.topicId}', '${object.id}')">
+                    <div class="card-owner">${editorsDisplay}</div>
+                    <div class="topic-context">From: ${escapeHtml(object.topic_name || 'Unknown Topic')}</div>
+                    <h3>${escapeHtml(object.name)}</h3>
+                    ${object.avg_rating > 0 ? `
+                        <div class="rating">
+                            <span class="stars">${renderStars(object.avg_rating)}</span>
+                            <span class="rating-text">${object.avg_rating.toFixed(1)} (${object.rating_count} review${object.rating_count !== 1 ? 's' : ''})</span>
+                        </div>
+                    ` : `
+                        <div class="rating">
+                            <span class="rating-text">No ratings yet</span>
+                        </div>
+                    `}
+                    ${tags.length > 0 ? `
+                        <div class="tags">
+                            ${tags.map(tag => `<span class="tag clickable" onclick="searchByTag('${escapeHtml(tag.name)}', event)">${escapeHtml(tag.name)}</span>`).join('')}
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+        }));
+        
+        let html = objectCards.join('');
+        
+        // Add pagination controls
+        if (pagination && pagination.totalPages > 1) {
+            html += renderPaginationControls('objects', pagination);
+        }
+        
+        grid.innerHTML = html;
+    } catch (error) {
+        console.error('Error rendering search objects:', error);
+        grid.innerHTML = '<div class="error">Failed to load object results</div>';
+    }
+}
+
+// Pagination controls
+function renderPaginationControls(type, pagination) {
+    const { currentPage, totalPages, hasNext, hasPrev } = pagination;
+    
+    let controls = '<div class="pagination-controls">';
+    
+    if (hasPrev) {
+        controls += `<button class="pagination-btn" onclick="loadSearchPage(${currentPage - 1})">Previous</button>`;
+    }
+    
+    // Show page numbers (max 5 visible)
+    const startPage = Math.max(1, currentPage - 2);
+    const endPage = Math.min(totalPages, startPage + 4);
+    
+    if (startPage > 1) {
+        controls += `<button class="pagination-btn" onclick="loadSearchPage(1)">1</button>`;
+        if (startPage > 2) {
+            controls += '<span class="pagination-ellipsis">...</span>';
+        }
+    }
+    
+    for (let i = startPage; i <= endPage; i++) {
+        controls += `<button class="pagination-btn ${i === currentPage ? 'active' : ''}" onclick="loadSearchPage(${i})">${i}</button>`;
+    }
+    
+    if (endPage < totalPages) {
+        if (endPage < totalPages - 1) {
+            controls += '<span class="pagination-ellipsis">...</span>';
+        }
+        controls += `<button class="pagination-btn" onclick="loadSearchPage(${totalPages})">${totalPages}</button>`;
+    }
+    
+    if (hasNext) {
+        controls += `<button class="pagination-btn" onclick="loadSearchPage(${currentPage + 1})">Next</button>`;
+    }
+    
+    controls += '</div>';
+    return controls;
+}
+
+// Load specific search page
+function loadSearchPage(page) {
+    performOptimizedSearch(page);
+}
+
+// Enhanced fetch functions with pagination support
+async function fetchTopics(page = 1, limit = 20, search = '', sortBy = 'created_at', sortOrder = 'DESC') {
+    const params = new URLSearchParams({
+        page: page.toString(),
+        limit: limit.toString(),
+        sortBy,
+        sortOrder
+    });
+    
+    if (search) {
+        params.append('search', search);
+    }
+    
+    return await cachedFetch(`${API_BASE}/topics?${params}`);
+}
+
+async function fetchObjects(topicId, page = 1, limit = 20, sortBy = 'created_at', sortOrder = 'DESC') {
+    const params = new URLSearchParams({
+        page: page.toString(),
+        limit: limit.toString(),
+        sortBy,
+        sortOrder
+    });
+    
+    return await cachedFetch(`${API_BASE}/topics/${topicId}/objects?${params}`);
+}
+
+// Enhanced search input handler with debouncing
+function handleSearchKeypress(event) {
+    if (event.key === 'Enter') {
+        clearTimeout(searchTimeout);
+        performOptimizedSearch();
+    } else {
+        debounceSearch();
+    }
+}
+
+// Clear cache when needed
+function clearApiCache() {
+    apiCache.clear();
+}
+
+// Update existing functions to use optimized versions
+async function performSearch() {
+    await performOptimizedSearch();
+}
+
+async function performAdvancedSearch() {
+    await performOptimizedSearch();
+    toggleAdvancedSearch(); // Hide the panel after search
+}
+
+// ... existing code ...
