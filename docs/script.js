@@ -1717,7 +1717,8 @@ async function renderObjectDetails() {
 async function fetchRatings(objectId) {
     const res = await fetch(BACKEND_URL + `/api/objects/${objectId}/ratings`);
     if (!res.ok) throw new Error('Failed to fetch ratings');
-    return await res.json();
+    const data = await res.json();
+    return data.ratings || []; // Return the ratings array, or an empty array if undefined
 }
 
 async function submitRatingToAPI(objectId, rating, review) {
@@ -2825,10 +2826,18 @@ async function renderAdminUsersList() {
         });
         
         if (!response.ok) {
-            throw new Error('Failed to fetch users');
+            const errorData = await response.json().catch(() => ({ error: 'Failed to fetch users and parse error response.' }));
+            throw new Error(errorData.error || `Failed to fetch users. Status: ${response.status}`);
         }
         
-        const users = await response.json();
+        const result = await response.json();
+        
+        if (!result || !Array.isArray(result.users)) {
+            console.error('API response for admin users is not in the expected format:', result);
+            throw new Error('Received invalid user data from server.');
+        }
+        const users = result.users;
+        
         let html = '<table style="width:100%;border-collapse:collapse;border:1px solid #ddd;"><tr style="background:#f5f5f5;"><th style="padding:8px;border:1px solid #ddd;">Username</th><th style="padding:8px;border:1px solid #ddd;">Email</th><th style="padding:8px;border:1px solid #ddd;">Admin</th><th style="padding:8px;border:1px solid #ddd;">Actions</th></tr>';
         
         users.forEach(user => {
