@@ -1444,6 +1444,9 @@ async function addTopic(event) {
         console.log('Attempting to create topic:', topicName, 'with tags:', tags);
         await createTopic(topicName, tags);
         
+        // Clear API cache to ensure fresh data
+        clearApiCache();
+        
         // Clear form
         document.getElementById('topic-name').value = '';
         document.getElementById('topic-tags').value = '';
@@ -1632,6 +1635,9 @@ async function addObject(event) {
                 await assignTagsToObject(newObject.id, allTags);
             }
         }
+        
+        // Clear API cache to ensure fresh data
+        clearApiCache();
         
         renderObjects();
         hideAddObjectForm();
@@ -4164,6 +4170,10 @@ async function editObject() {
         if (newTags.length > 0 || currentTagNames.length > 0) {
             await assignTagsToObject(currentObjectId, newTags);
         }
+        
+        // Clear API cache to ensure fresh data
+        clearApiCache();
+        
         showNotification('Object updated successfully');
         await showObjectPage(currentObjectId); // Refresh the page
     } catch (error) {
@@ -4184,6 +4194,10 @@ async function deleteObjectUI() {
         if (!confirm(`Are you sure you want to delete the object "${object.name}"? This will also delete all ratings for this object.`)) return;
         
         await deleteObject(currentObjectId);
+        
+        // Clear API cache to ensure fresh data
+        clearApiCache();
+        
         await showTopicPage(currentTopicId); // Go back to topic page
         showNotification('Object deleted successfully!');
     } catch (error) {
@@ -4210,6 +4224,9 @@ async function editTopic() {
         
         await updateTopic(currentTopicId, newName.trim(), newTags);
         
+        // Clear API cache to ensure fresh data
+        clearApiCache();
+        
         // Refresh the page
         await showTopicPage(currentTopicId);
         showNotification('Topic updated successfully!');
@@ -4226,6 +4243,10 @@ async function deleteTopicUI() {
         if (!confirm(`Are you sure you want to delete the topic "${topic.name}"? This will also delete all objects and ratings within it.`)) return;
         
         await deleteTopic(currentTopicId);
+        
+        // Clear API cache to ensure fresh data
+        clearApiCache();
+        
         showHomePage();
         showNotification('Topic deleted successfully!');
     } catch (error) {
