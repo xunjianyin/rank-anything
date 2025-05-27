@@ -334,15 +334,15 @@ function updateUserInterface() {
         updateDailyLimitsDisplay();
         updateProposalCount();
         
-        // Enable/disable buttons based on daily limits
+        // Enable/disable buttons based on daily limits (admins have no limits)
         const usage = getCurrentDailyUsage();
         console.log('Daily usage:', usage);
         if (addTopicBtn) {
-            addTopicBtn.disabled = usage.topics >= 4;
-            console.log('Add topic button disabled:', addTopicBtn.disabled, 'usage.topics:', usage.topics);
+            addTopicBtn.disabled = currentUser.isAdmin ? false : usage.topics >= 4;
+            console.log('Add topic button disabled:', addTopicBtn.disabled, 'usage.topics:', usage.topics, 'isAdmin:', currentUser.isAdmin);
         }
-        if (addObjectBtn) addObjectBtn.disabled = usage.objects >= 32;
-        if (submitRatingBtn) submitRatingBtn.disabled = usage.ratings >= 64;
+        if (addObjectBtn) addObjectBtn.disabled = currentUser.isAdmin ? false : usage.objects >= 32;
+        if (submitRatingBtn) submitRatingBtn.disabled = currentUser.isAdmin ? false : usage.ratings >= 64;
         // Re-bind dropdown events after UI update
         const dropdown = document.getElementById('user-dropdown');
         if (dropdown) dropdown.onclick = function(e) { e.stopPropagation(); };
@@ -399,6 +399,11 @@ function getCurrentDailyUsage() {
 function incrementDailyUsage(type) {
     if (!currentUser) return false;
     
+    // Administrators have no daily limits
+    if (currentUser.isAdmin) {
+        return true;
+    }
+    
     const usage = getCurrentDailyUsage();
     const limits = { topics: 4, objects: 32, ratings: 64 };
     
@@ -421,7 +426,11 @@ function updateDailyLimitsDisplay() {
     const usage = getCurrentDailyUsage();
     const display = document.getElementById('daily-limits-display');
     
-    display.textContent = `Today: ${usage.topics}/4 topics, ${usage.objects}/32 objects, ${usage.ratings}/64 ratings`;
+    if (currentUser.isAdmin) {
+        display.textContent = `Today: ${usage.topics} topics, ${usage.objects} objects, ${usage.ratings} ratings (Admin - No Limits)`;
+    } else {
+        display.textContent = `Today: ${usage.topics}/4 topics, ${usage.objects}/32 objects, ${usage.ratings}/64 ratings`;
+    }
 }
 
 // Modal functions
@@ -1429,8 +1438,8 @@ async function addTopic(event) {
         return;
     }
     
-    // Check daily limits before proceeding
-    if (!incrementDailyUsage('topics')) {
+    // Check daily limits before proceeding (admins bypass this)
+    if (!currentUser.isAdmin && !incrementDailyUsage('topics')) {
         return;
     }
     
@@ -1464,13 +1473,15 @@ async function addTopic(event) {
             alert('Failed to create topic: ' + e.message);
         }
         
-        // Revert daily usage increment on failure
-        const usage = getCurrentDailyUsage();
-        usage.topics = Math.max(0, usage.topics - 1);
-        data.dailyUsage[currentUser.username] = usage;
-        saveData();
-        updateDailyLimitsDisplay();
-        updateUserInterface();
+        // Revert daily usage increment on failure (only for non-admins)
+        if (!currentUser.isAdmin) {
+            const usage = getCurrentDailyUsage();
+            usage.topics = Math.max(0, usage.topics - 1);
+            data.dailyUsage[currentUser.username] = usage;
+            saveData();
+            updateDailyLimitsDisplay();
+            updateUserInterface();
+        }
     }
 }
 
@@ -1610,8 +1621,8 @@ async function addObject(event) {
         return;
     }
     
-    // Check daily limits before proceeding
-    if (!incrementDailyUsage('objects')) {
+    // Check daily limits before proceeding (admins bypass this)
+    if (!currentUser.isAdmin && !incrementDailyUsage('objects')) {
         return;
     }
     
@@ -1649,13 +1660,15 @@ async function addObject(event) {
         } else {
             alert('Failed to create object: ' + e.message);
         }
-        // Revert daily usage increment on failure
-        const usage = getCurrentDailyUsage();
-        usage.objects = Math.max(0, usage.objects - 1);
-        data.dailyUsage[currentUser.username] = usage;
-        saveData();
-        updateDailyLimitsDisplay();
-        updateUserInterface();
+        // Revert daily usage increment on failure (only for non-admins)
+        if (!currentUser.isAdmin) {
+            const usage = getCurrentDailyUsage();
+            usage.objects = Math.max(0, usage.objects - 1);
+            data.dailyUsage[currentUser.username] = usage;
+            saveData();
+            updateDailyLimitsDisplay();
+            updateUserInterface();
+        }
     }
 }
 
@@ -1790,6 +1803,11 @@ async function submitRating() {
     }
     if (selectedRating === 0) {
         alert('Please select a rating');
+        return;
+    }
+    
+    // Check daily limits before proceeding (admins bypass this)
+    if (!currentUser.isAdmin && !incrementDailyUsage('ratings')) {
         return;
     }
     
