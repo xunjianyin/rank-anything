@@ -1,6 +1,6 @@
 const express = require('express');
 const cors = require('cors');
-const { init, db } = require('./db');
+const { init, db, dbAsync } = require('./db');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const nodemailer = require('nodemailer');
@@ -620,27 +620,28 @@ app.get('/api/editors/:targetType/:targetId', (req, res) => {
   });
 });
 // Create a topic
-app.post('/api/topics', authenticateToken, validateContent, (req, res) => {
+app.post('/api/topics', authenticateToken, validateContent, async (req, res) => {
   const { name, tags } = req.body;
   if (!name) return res.status(400).json({ error: 'Name is required.' });
   
-  // Parse and clean tags
-  let cleanedTags = [];
-  if (tags) {
-    if (typeof tags === 'string') {
-      cleanedTags = parseAndCleanTags(tags);
-    } else if (Array.isArray(tags)) {
-      cleanedTags = tags.flatMap(tag => parseAndCleanTags(tag));
+  try {
+    // Parse and clean tags
+    let cleanedTags = [];
+    if (tags) {
+      if (typeof tags === 'string') {
+        cleanedTags = parseAndCleanTags(tags);
+      } else if (Array.isArray(tags)) {
+        cleanedTags = tags.flatMap(tag => parseAndCleanTags(tag));
+      }
     }
-  }
-  
-  // Check if user is restricted from editing
-  db.get(`
-    SELECT * FROM user_restrictions 
-    WHERE user_id = ? AND restriction_type = 'editing_ban' 
-    AND start_date <= CURRENT_TIMESTAMP AND end_date > CURRENT_TIMESTAMP
-  `, [req.user.id], (err, restriction) => {
-    if (err) return res.status(500).json({ error: 'Database error.' });
+    
+    // Check if user is restricted from editing
+    const restriction = await dbAsync.get(`
+      SELECT * FROM user_restrictions 
+      WHERE user_id = ? AND restriction_type = 'editing_ban' 
+      AND start_date <= CURRENT_TIMESTAMP AND end_date > CURRENT_TIMESTAMP
+    `, [req.user.id]);
+    
     if (restriction) {
       return res.status(403).json({ 
         error: 'You are currently restricted from editing until ' + new Date(restriction.end_date).toLocaleString() 
@@ -648,55 +649,44 @@ app.post('/api/topics', authenticateToken, validateContent, (req, res) => {
     }
     
     // Check if topic name already exists
-    db.get('SELECT * FROM topics WHERE name = ?', [name], (err, existingTopic) => {
-      if (err) return res.status(500).json({ error: 'Database error.' });
-      if (existingTopic) return res.status(400).json({ error: 'A topic with this name already exists.' });
-      
-      db.run('INSERT INTO topics (name, creator_id) VALUES (?, ?)', [name, req.user.id], async function(err) {
-        if (err) return res.status(500).json({ error: 'Database error.' });
-        const topicId = this.lastID;
+    const existingTopic = await dbAsync.get('SELECT * FROM topics WHERE name = ?', [name]);
+    if (existingTopic) {
+      return res.status(400).json({ error: 'A topic with this name already exists.' });
+    }
+    
+    // Create the topic
+    const result = await dbAsync.run('INSERT INTO topics (name, creator_id) VALUES (?, ?)', [name, req.user.id]);
+    const topicId = result.lastID;
+    
+    // Record creation in edit history
+    try {
+      await recordEditHistory('topic', topicId, req.user.id, 'create', null, { name, tags: cleanedTags });
+    } catch (historyErr) {
+      console.error('Failed to record edit history:', historyErr);
+    }
+    
+    // Add tags if provided
+    if (cleanedTags.length > 0) {
+      await Promise.all(cleanedTags.map(async (tagName) => {
+        // Insert tag if it doesn't exist
+        await dbAsync.run('INSERT OR IGNORE INTO tags (name) VALUES (?)', [tagName]);
         
-        // Record creation in edit history
-        try {
-          await recordEditHistory('topic', topicId, req.user.id, 'create', null, { name, tags: cleanedTags });
-        } catch (historyErr) {
-          console.error('Failed to record edit history:', historyErr);
-        }
+        // Get tag ID
+        const tag = await dbAsync.get('SELECT id FROM tags WHERE name = ?', [tagName]);
         
-        // Add tags if provided
-        if (cleanedTags.length > 0) {
-          const insertTags = cleanedTags.map(tagName => {
-            return new Promise((resolve, reject) => {
-              db.run('INSERT OR IGNORE INTO tags (name) VALUES (?)', [tagName], function(err) {
-                if (err) return reject(err);
-                db.get('SELECT id FROM tags WHERE name = ?', [tagName], (err, tag) => {
-                  if (err) return reject(err);
-                  db.run('INSERT OR IGNORE INTO topic_tags (topic_id, tag_id) VALUES (?, ?)', [topicId, tag.id], function(err) {
-                    if (err) return reject(err);
-                    resolve();
-                  });
-                });
-              });
-            });
-          });
-          
-          Promise.all(insertTags)
-            .then(() => {
-              db.get('SELECT * FROM topics WHERE id = ?', [topicId], (err, topic) => {
-                if (err) return res.status(500).json({ error: 'Database error.' });
-                res.json(topic);
-              });
-            })
-            .catch(() => res.status(500).json({ error: 'Database error.' }));
-        } else {
-          db.get('SELECT * FROM topics WHERE id = ?', [topicId], (err, topic) => {
-            if (err) return res.status(500).json({ error: 'Database error.' });
-            res.json(topic);
-          });
-        }
-      });
-    });
-  });
+        // Link tag to topic
+        await dbAsync.run('INSERT OR IGNORE INTO topic_tags (topic_id, tag_id) VALUES (?, ?)', [topicId, tag.id]);
+      }));
+    }
+    
+    // Return the created topic
+    const topic = await dbAsync.get('SELECT * FROM topics WHERE id = ?', [topicId]);
+    res.json(topic);
+    
+  } catch (error) {
+    console.error('Error creating topic:', error);
+    res.status(500).json({ error: 'Database error.' });
+  }
 });
 // Edit a topic (only creator or admin)
 app.put('/api/topics/:id', authenticateToken, validateContent, (req, res) => {
@@ -809,11 +799,15 @@ app.put('/api/topics/:id', authenticateToken, validateContent, (req, res) => {
   }
 });
 // Delete a topic (only creator or admin)
-app.delete('/api/topics/:id', authenticateToken, (req, res) => {
+app.delete('/api/topics/:id', authenticateToken, async (req, res) => {
   const topicId = req.params.id;
-  db.get('SELECT * FROM topics WHERE id = ?', [topicId], async (err, topic) => {
-    if (err || !topic) return res.status(404).json({ error: 'Topic not found.' });
-    if (topic.creator_id !== req.user.id && !req.user.isAdmin) return res.status(403).json({ error: 'Not allowed.' });
+  
+  try {
+    const topic = await dbAsync.get('SELECT * FROM topics WHERE id = ?', [topicId]);
+    if (!topic) return res.status(404).json({ error: 'Topic not found.' });
+    if (topic.creator_id !== req.user.id && !req.user.isAdmin) {
+      return res.status(403).json({ error: 'Not allowed.' });
+    }
     
     // Record deletion in edit history before deleting
     try {
@@ -823,32 +817,33 @@ app.delete('/api/topics/:id', authenticateToken, (req, res) => {
     }
     
     // Delete all related data in proper order
-    db.serialize(() => {
+    await Promise.all([
       // Delete ratings for objects in this topic
-      db.run('DELETE FROM ratings WHERE object_id IN (SELECT id FROM objects WHERE topic_id = ?)', [topicId]);
+      dbAsync.run('DELETE FROM ratings WHERE object_id IN (SELECT id FROM objects WHERE topic_id = ?)', [topicId]),
       
       // Delete object tags for objects in this topic
-      db.run('DELETE FROM object_tags WHERE object_id IN (SELECT id FROM objects WHERE topic_id = ?)', [topicId]);
+      dbAsync.run('DELETE FROM object_tags WHERE object_id IN (SELECT id FROM objects WHERE topic_id = ?)', [topicId]),
       
       // Delete edit history for objects in this topic
-      db.run('DELETE FROM edit_history WHERE target_type = "object" AND target_id IN (SELECT id FROM objects WHERE topic_id = ?)', [topicId]);
-      
-      // Delete objects in this topic
-      db.run('DELETE FROM objects WHERE topic_id = ?', [topicId]);
-      
-      // Delete topic tags
-      db.run('DELETE FROM topic_tags WHERE topic_id = ?', [topicId]);
-      
-      // Delete edit history for this topic
-      db.run('DELETE FROM edit_history WHERE target_type = "topic" AND target_id = ?', [topicId]);
-      
-      // Finally delete the topic itself
-      db.run('DELETE FROM topics WHERE id = ?', [topicId], function(err) {
-        if (err) return res.status(500).json({ error: 'Database error.' });
-        res.json({ success: true });
-      });
-    });
-  });
+      dbAsync.run('DELETE FROM edit_history WHERE target_type = "object" AND target_id IN (SELECT id FROM objects WHERE topic_id = ?)', [topicId])
+    ]);
+    
+    // Delete objects and topic-specific data
+    await Promise.all([
+      dbAsync.run('DELETE FROM objects WHERE topic_id = ?', [topicId]),
+      dbAsync.run('DELETE FROM topic_tags WHERE topic_id = ?', [topicId]),
+      dbAsync.run('DELETE FROM edit_history WHERE target_type = "topic" AND target_id = ?', [topicId])
+    ]);
+    
+    // Finally delete the topic itself
+    await dbAsync.run('DELETE FROM topics WHERE id = ?', [topicId]);
+    
+    res.json({ success: true });
+    
+  } catch (error) {
+    console.error('Error deleting topic:', error);
+    res.status(500).json({ error: 'Database error.' });
+  }
 });
 
 // --- Object Endpoints ---
@@ -861,32 +856,34 @@ app.get('/api/topics/:topicId/objects', (req, res) => {
   });
 });
 // Create an object in a topic
-app.post('/api/topics/:topicId/objects', authenticateToken, validateContent, (req, res) => {
+app.post('/api/topics/:topicId/objects', authenticateToken, validateContent, async (req, res) => {
   const topicId = req.params.topicId;
   const { name } = req.body;
   if (!name) return res.status(400).json({ error: 'Name is required.' });
   
-  // Check if object name already exists in this topic
-  db.get('SELECT * FROM objects WHERE topic_id = ? AND name = ?', [topicId, name], (err, existingObject) => {
-    if (err) return res.status(500).json({ error: 'Database error.' });
-    if (existingObject) return res.status(400).json({ error: 'An object with this name already exists in this topic.' });
+  try {
+    // Check if object name already exists in this topic
+    const existingObject = await dbAsync.get('SELECT * FROM objects WHERE topic_id = ? AND name = ?', [topicId, name]);
+    if (existingObject) {
+      return res.status(400).json({ error: 'An object with this name already exists in this topic.' });
+    }
     
     // Check if user is restricted from editing
-  db.get(`
-    SELECT * FROM user_restrictions 
-    WHERE user_id = ? AND restriction_type = 'editing_ban' 
-    AND start_date <= CURRENT_TIMESTAMP AND end_date > CURRENT_TIMESTAMP
-  `, [req.user.id], (err, restriction) => {
-    if (err) return res.status(500).json({ error: 'Database error.' });
+    const restriction = await dbAsync.get(`
+      SELECT * FROM user_restrictions 
+      WHERE user_id = ? AND restriction_type = 'editing_ban' 
+      AND start_date <= CURRENT_TIMESTAMP AND end_date > CURRENT_TIMESTAMP
+    `, [req.user.id]);
+    
     if (restriction) {
       return res.status(403).json({ 
         error: 'You are currently restricted from editing until ' + new Date(restriction.end_date).toLocaleString() 
       });
     }
-  
-  db.run('INSERT INTO objects (topic_id, name, creator_id) VALUES (?, ?, ?)', [topicId, name, req.user.id], async function(err) {
-    if (err) return res.status(500).json({ error: 'Database error.' });
-    const objectId = this.lastID;
+    
+    // Create the object
+    const result = await dbAsync.run('INSERT INTO objects (topic_id, name, creator_id) VALUES (?, ?, ?)', [topicId, name, req.user.id]);
+    const objectId = result.lastID;
     
     // Record creation in edit history
     try {
@@ -896,37 +893,22 @@ app.post('/api/topics/:topicId/objects', authenticateToken, validateContent, (re
     }
     
     // Inherit tags from topic
-    db.all('SELECT tag_id FROM topic_tags WHERE topic_id = ?', [topicId], (err, topicTags) => {
-      if (err) return res.status(500).json({ error: 'Database error.' });
-      
-      if (topicTags.length > 0) {
-        const inheritTags = topicTags.map(topicTag => {
-          return new Promise((resolve, reject) => {
-            db.run('INSERT OR IGNORE INTO object_tags (object_id, tag_id) VALUES (?, ?)', [objectId, topicTag.tag_id], function(err) {
-              if (err) return reject(err);
-              resolve();
-            });
-          });
-        });
-        
-        Promise.all(inheritTags)
-          .then(() => {
-            db.get('SELECT * FROM objects WHERE id = ?', [objectId], (err, object) => {
-              if (err) return res.status(500).json({ error: 'Database error.' });
-              res.json(object);
-            });
-          })
-          .catch(() => res.status(500).json({ error: 'Database error.' }));
-      } else {
-        db.get('SELECT * FROM objects WHERE id = ?', [objectId], (err, object) => {
-          if (err) return res.status(500).json({ error: 'Database error.' });
-          res.json(object);
-        });
-      }
-    });
-  });
-  });
-  });
+    const topicTags = await dbAsync.all('SELECT tag_id FROM topic_tags WHERE topic_id = ?', [topicId]);
+    
+    if (topicTags.length > 0) {
+      await Promise.all(topicTags.map(async (topicTag) => {
+        await dbAsync.run('INSERT OR IGNORE INTO object_tags (object_id, tag_id) VALUES (?, ?)', [objectId, topicTag.tag_id]);
+      }));
+    }
+    
+    // Return the created object
+    const object = await dbAsync.get('SELECT * FROM objects WHERE id = ?', [objectId]);
+    res.json(object);
+    
+  } catch (error) {
+    console.error('Error creating object:', error);
+    res.status(500).json({ error: 'Database error.' });
+  }
 });
 // Edit an object (only creator or admin)
 app.put('/api/objects/:id', authenticateToken, validateContent, (req, res) => {
@@ -990,11 +972,15 @@ app.put('/api/objects/:id', authenticateToken, validateContent, (req, res) => {
   }
 });
 // Delete an object (only creator or admin)
-app.delete('/api/objects/:id', authenticateToken, (req, res) => {
+app.delete('/api/objects/:id', authenticateToken, async (req, res) => {
   const objectId = req.params.id;
-  db.get('SELECT * FROM objects WHERE id = ?', [objectId], async (err, object) => {
-    if (err || !object) return res.status(404).json({ error: 'Object not found.' });
-    if (object.creator_id !== req.user.id && !req.user.isAdmin) return res.status(403).json({ error: 'Not allowed.' });
+  
+  try {
+    const object = await dbAsync.get('SELECT * FROM objects WHERE id = ?', [objectId]);
+    if (!object) return res.status(404).json({ error: 'Object not found.' });
+    if (object.creator_id !== req.user.id && !req.user.isAdmin) {
+      return res.status(403).json({ error: 'Not allowed.' });
+    }
     
     // Record deletion in edit history before deleting
     try {
@@ -1004,23 +990,21 @@ app.delete('/api/objects/:id', authenticateToken, (req, res) => {
     }
     
     // Delete all related data in proper order
-    db.serialize(() => {
-      // Delete ratings for this object
-      db.run('DELETE FROM ratings WHERE object_id = ?', [objectId]);
-      
-      // Delete object tags
-      db.run('DELETE FROM object_tags WHERE object_id = ?', [objectId]);
-      
-      // Delete edit history for this object
-      db.run('DELETE FROM edit_history WHERE target_type = "object" AND target_id = ?', [objectId]);
-      
-      // Finally delete the object itself
-      db.run('DELETE FROM objects WHERE id = ?', [objectId], function(err) {
-        if (err) return res.status(500).json({ error: 'Database error.' });
-        res.json({ success: true });
-      });
-    });
-  });
+    await Promise.all([
+      dbAsync.run('DELETE FROM ratings WHERE object_id = ?', [objectId]),
+      dbAsync.run('DELETE FROM object_tags WHERE object_id = ?', [objectId]),
+      dbAsync.run('DELETE FROM edit_history WHERE target_type = "object" AND target_id = ?', [objectId])
+    ]);
+    
+    // Finally delete the object itself
+    await dbAsync.run('DELETE FROM objects WHERE id = ?', [objectId]);
+    
+    res.json({ success: true });
+    
+  } catch (error) {
+    console.error('Error deleting object:', error);
+    res.status(500).json({ error: 'Database error.' });
+  }
 });
 
 // --- Tag Endpoints ---
