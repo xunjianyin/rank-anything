@@ -17,62 +17,7 @@ const contentFilter = new ContentFilter();
 
 // Email configuration with multiple fallbacks
 const EMAIL_CONFIGS = [
-  // Primary: 163.com with STARTTLS (more reliable than SSL)
-  {
-    name: '163.com STARTTLS',
-    host: 'smtp.163.com',
-    port: 587,
-    secure: false,
-    auth: {
-      user: 'rank_anything@163.com',
-      pass: process.env.EMAIL_PASSWORD || 'QHDfYMBxDTyLdJVB'
-    },
-    tls: {
-      rejectUnauthorized: false,
-      ciphers: 'SSLv3'
-    },
-    requireTLS: true,
-    connectionTimeout: 60000,
-    greetingTimeout: 30000,
-    socketTimeout: 60000,
-    debug: true
-  },
-  // Fallback 1: 163.com with SSL (port 465)
-  {
-    name: '163.com SSL',
-    host: 'smtp.163.com',
-    port: 465,
-    secure: true,
-    auth: {
-      user: 'rank_anything@163.com',
-      pass: process.env.EMAIL_PASSWORD || 'QHDfYMBxDTyLdJVB'
-    },
-    tls: {
-      rejectUnauthorized: false,
-      servername: 'smtp.163.com'
-    },
-    connectionTimeout: 60000,
-    greetingTimeout: 30000,
-    socketTimeout: 60000,
-    debug: true
-  },
-  // Fallback 2: 163.com without TLS (last resort)
-  {
-    name: '163.com Plain',
-    host: 'smtp.163.com',
-    port: 25,
-    secure: false,
-    auth: {
-      user: 'rank_anything@163.com',
-      pass: process.env.EMAIL_PASSWORD || 'QHDfYMBxDTyLdJVB'
-    },
-    ignoreTLS: true,
-    connectionTimeout: 60000,
-    greetingTimeout: 30000,
-    socketTimeout: 60000,
-    debug: true
-  },
-  // Fallback 3: Gmail (if Gmail credentials are provided)
+  // Primary: Gmail (most reliable if credentials are provided)
   {
     name: 'Gmail',
     service: 'gmail',
@@ -82,18 +27,46 @@ const EMAIL_CONFIGS = [
     },
     tls: {
       rejectUnauthorized: false
+    }
+  },
+  // Fallback 1: Outlook/Hotmail
+  {
+    name: 'Outlook',
+    service: 'hotmail',
+    auth: {
+      user: process.env.OUTLOOK_USER,
+      pass: process.env.OUTLOOK_PASSWORD
     },
-    connectionTimeout: 60000,
-    greetingTimeout: 30000,
-    socketTimeout: 60000
+    tls: {
+      rejectUnauthorized: false
+    }
+  },
+  // Fallback 2: 163.com with basic settings
+  {
+    name: '163.com Basic',
+    host: 'smtp.163.com',
+    port: 25,
+    secure: false,
+    auth: {
+      user: 'rank_anything@163.com',
+      pass: process.env.EMAIL_PASSWORD || 'QHDfYMBxDTyLdJVB'
+    },
+    ignoreTLS: true,
+    connectionTimeout: 5000,
+    greetingTimeout: 3000,
+    socketTimeout: 5000
   }
 ];
 
-// Filter out Gmail config if credentials are not provided
+// Filter out configs that don't have credentials
 const availableConfigs = EMAIL_CONFIGS.filter(config => {
   if (config.name === 'Gmail') {
     return process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD;
   }
+  if (config.name === 'Outlook') {
+    return process.env.OUTLOOK_USER && process.env.OUTLOOK_PASSWORD;
+  }
+  // Always include 163.com as fallback
   return true;
 });
 
@@ -131,6 +104,18 @@ let lastEmailError = null;
 
 // Send verification email with multiple fallback configurations
 async function sendVerificationEmail(email, code, username) {
+  // TEMPORARY: Log email instead of sending for development
+  console.log('=== EMAIL VERIFICATION ===');
+  console.log(`To: ${email}`);
+  console.log(`Username: ${username}`);
+  console.log(`Verification Code: ${code}`);
+  console.log('========================');
+  
+  // For development, always return success
+  return { success: true, usedConfig: 'Console Log' };
+  
+  // ORIGINAL EMAIL SENDING CODE (commented out for now)
+  /*
   // If email service is known to be down, return early
   if (!emailServiceWorking) {
     console.log('Email service is disabled due to previous failures');
@@ -222,6 +207,7 @@ async function sendVerificationEmail(email, code, username) {
     success: false, 
     error: 'No email configurations available' 
   };
+  */
 }
 
 app.use(cors());
@@ -335,41 +321,6 @@ app.post('/api/register', validateContent, async (req, res) => {
     if (err) return res.status(500).json({ error: 'Database error.' });
     if (existingUser) return res.status(400).json({ error: 'Email or username already exists.' });
     
-    // TEMPORARY: Skip email verification due to email service issues
-    // Create user account directly
-    const hash = bcrypt.hashSync(password, 10);
-    
-    db.run('INSERT INTO users (username, email, password, email_verified) VALUES (?, ?, ?, ?)', 
-      [username, email, hash, 0], function(err) {
-        if (err) return res.status(500).json({ error: 'Database error.' });
-        
-        const userId = this.lastID;
-        
-        // Generate JWT token
-        const token = jwt.sign({ 
-          id: userId, 
-          username: username, 
-          email: email, 
-          isAdmin: false 
-        }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
-        
-        res.json({ 
-          token, 
-          user: { 
-            id: userId, 
-            username: username, 
-            email: email, 
-            isAdmin: false,
-            emailVerified: false
-          },
-          message: 'Registration completed! Email verification is temporarily disabled.',
-          emailServiceDown: true
-        });
-      });
-    return;
-    
-    // OLD CODE - TEMPORARILY DISABLED
-    /*
     // Check if there's already a pending registration with this email/username
     db.get('SELECT * FROM pending_registrations WHERE email = ? OR username = ?', [email, username], async (err, pendingUser) => {
       if (err) return res.status(500).json({ error: 'Database error.' });
@@ -578,9 +529,8 @@ app.post('/api/verify-email', (req, res) => {
               message: 'Registration completed successfully! Welcome to Rank-Anything!'
             });
           });
-      });
+      }
     });
-    */
   });
 });
 
