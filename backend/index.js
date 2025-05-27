@@ -15,6 +15,42 @@ const JWT_EXPIRES_IN = '7d';
 // Initialize content filter
 const contentFilter = new ContentFilter();
 
+// Blocked email list
+const BLOCKED_EMAILS = [
+  'xjyin2018@163.com'
+];
+
+// Function to check if email is blocked
+function isEmailBlocked(email) {
+  return BLOCKED_EMAILS.includes(email.toLowerCase());
+}
+
+// Function to add email to blocked list
+function addBlockedEmail(email) {
+  const normalizedEmail = email.toLowerCase();
+  if (!BLOCKED_EMAILS.includes(normalizedEmail)) {
+    BLOCKED_EMAILS.push(normalizedEmail);
+    return true;
+  }
+  return false;
+}
+
+// Function to remove email from blocked list
+function removeBlockedEmail(email) {
+  const normalizedEmail = email.toLowerCase();
+  const index = BLOCKED_EMAILS.indexOf(normalizedEmail);
+  if (index > -1) {
+    BLOCKED_EMAILS.splice(index, 1);
+    return true;
+  }
+  return false;
+}
+
+// Function to get all blocked emails
+function getBlockedEmails() {
+  return [...BLOCKED_EMAILS];
+}
+
 // Email configuration with multiple fallbacks
 const EMAIL_CONFIGS = [
   // Primary: Gmail (most reliable if credentials are provided)
@@ -308,6 +344,11 @@ app.post('/api/register', validateContent, async (req, res) => {
   const { username, email, password } = req.body;
   if (!username || !email || !password) {
     return res.status(400).json({ error: 'All fields are required.' });
+  }
+
+  // Check if email is blocked
+  if (isEmailBlocked(email)) {
+    return res.status(403).json({ error: 'This email address is not allowed to register.' });
   }
 
   // Validate password
@@ -2264,6 +2305,91 @@ app.post('/api/admin/content-filter/test', authenticateToken, (req, res) => {
     isClean: result.isClean,
     violations: result.violations,
     message: result.isClean ? 'Content is clean' : contentFilter.generateErrorMessage(result.violations)
+  });
+});
+
+// --- Blocked Email Management Endpoints ---
+
+// Get all blocked emails
+app.get('/api/admin/blocked-emails', authenticateToken, (req, res) => {
+  if (!req.user.isAdmin) return res.status(403).json({ error: 'Admin access required.' });
+  
+  res.json({
+    blockedEmails: getBlockedEmails(),
+    count: getBlockedEmails().length
+  });
+});
+
+// Add email to blocked list
+app.post('/api/admin/blocked-emails', authenticateToken, (req, res) => {
+  if (!req.user.isAdmin) return res.status(403).json({ error: 'Admin access required.' });
+  
+  const { email } = req.body;
+  
+  if (!email || typeof email !== 'string') {
+    return res.status(400).json({ error: 'Email is required.' });
+  }
+  
+  // Validate email format
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(email)) {
+    return res.status(400).json({ error: 'Invalid email format.' });
+  }
+  
+  const added = addBlockedEmail(email);
+  
+  if (added) {
+    res.json({ 
+      message: 'Email added to blocked list successfully.',
+      email: email.toLowerCase(),
+      blockedEmails: getBlockedEmails(),
+      count: getBlockedEmails().length
+    });
+  } else {
+    res.status(400).json({ error: 'Email is already in the blocked list.' });
+  }
+});
+
+// Remove email from blocked list
+app.delete('/api/admin/blocked-emails', authenticateToken, (req, res) => {
+  if (!req.user.isAdmin) return res.status(403).json({ error: 'Admin access required.' });
+  
+  const { email } = req.body;
+  
+  if (!email || typeof email !== 'string') {
+    return res.status(400).json({ error: 'Email is required.' });
+  }
+  
+  const removed = removeBlockedEmail(email);
+  
+  if (removed) {
+    res.json({ 
+      message: 'Email removed from blocked list successfully.',
+      email: email.toLowerCase(),
+      blockedEmails: getBlockedEmails(),
+      count: getBlockedEmails().length
+    });
+  } else {
+    res.status(400).json({ error: 'Email is not in the blocked list.' });
+  }
+});
+
+// Check if email is blocked (for testing)
+app.post('/api/admin/blocked-emails/check', authenticateToken, (req, res) => {
+  if (!req.user.isAdmin) return res.status(403).json({ error: 'Admin access required.' });
+  
+  const { email } = req.body;
+  
+  if (!email || typeof email !== 'string') {
+    return res.status(400).json({ error: 'Email is required.' });
+  }
+  
+  const blocked = isEmailBlocked(email);
+  
+  res.json({
+    email: email.toLowerCase(),
+    isBlocked: blocked,
+    message: blocked ? 'Email is blocked' : 'Email is not blocked'
   });
 });
 

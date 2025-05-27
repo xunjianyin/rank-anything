@@ -2742,6 +2742,7 @@ async function renderAdminPanel() {
                 <div class="admin-tabs">
                     <button class="admin-tab active" onclick="showAdminTab('users')">User Management</button>
                     <button class="admin-tab" onclick="showAdminTab('content-filter')">Content Filter</button>
+                    <button class="admin-tab" onclick="showAdminTab('blocked-emails')">Blocked Emails</button>
                 </div>
                 <div id="admin-users-tab" class="admin-tab-content active">
                     <h3>All Users</h3>
@@ -2751,12 +2752,17 @@ async function renderAdminPanel() {
                     <h3>Content Filter Management</h3>
                     <div id='admin-content-filter-content'>Loading...</div>
                 </div>
+                <div id="admin-blocked-emails-tab" class="admin-tab-content" style="display: none;">
+                    <h3>Blocked Email Management</h3>
+                    <div id='admin-blocked-emails-content'>Loading...</div>
+                </div>
             </div>
         </div>
     `;
     modal.innerHTML = html;
     await renderAdminUsersList();
     await renderAdminContentFilter();
+    await renderAdminBlockedEmails();
 }
 
 async function renderAdminUsersList() {
@@ -4534,6 +4540,191 @@ window.testContent = testContent;
 window.viewCategoryWords = viewCategoryWords;
 window.addWordsToCategory = addWordsToCategory;
 window.removeWordsFromCategory = removeWordsFromCategory;
+
+// Blocked Email Management Functions
+async function renderAdminBlockedEmails() {
+    const container = document.getElementById('admin-blocked-emails-content');
+    
+    try {
+        const token = getAuthToken();
+        const response = await fetch(BACKEND_URL + '/api/admin/blocked-emails', {
+            headers: { 'Authorization': 'Bearer ' + token }
+        });
+        
+        if (!response.ok) {
+            throw new Error('Failed to fetch blocked emails');
+        }
+        
+        const data = await response.json();
+        
+        let html = `
+            <div class="blocked-emails-management">
+                <div class="blocked-emails-actions">
+                    <h4>Add New Blocked Email</h4>
+                    <div class="add-email-form">
+                        <input type="email" id="new-blocked-email" placeholder="Enter email address to block" style="width: 300px; margin-right: 10px;">
+                        <button class="btn btn-danger" onclick="addBlockedEmail()">Block Email</button>
+                    </div>
+                </div>
+                
+                <div class="blocked-emails-test" style="margin: 20px 0;">
+                    <h4>Test Email</h4>
+                    <div class="test-email-form">
+                        <input type="email" id="test-email-input" placeholder="Enter email to test" style="width: 300px; margin-right: 10px;">
+                        <button class="btn btn-secondary" onclick="testEmailBlocked()">Test Email</button>
+                    </div>
+                    <div id="test-email-result" style="margin-top: 10px;"></div>
+                </div>
+                
+                <div class="blocked-emails-list">
+                    <h4>Blocked Emails (${data.count})</h4>
+        `;
+        
+        if (data.blockedEmails.length === 0) {
+            html += '<p style="color: #666;">No emails are currently blocked.</p>';
+        } else {
+            html += `
+                <div class="blocked-emails-grid" style="display: grid; gap: 10px;">
+            `;
+            
+            data.blockedEmails.forEach(email => {
+                html += `
+                    <div class="blocked-email-item" style="display: flex; justify-content: space-between; align-items: center; padding: 10px; border: 1px solid #ddd; border-radius: 5px; background: #f9f9f9;">
+                        <span style="font-family: monospace; color: #333;">${escapeHtml(email)}</span>
+                        <button class="btn btn-small btn-secondary" onclick="removeBlockedEmail('${escapeHtml(email)}')">Unblock</button>
+                    </div>
+                `;
+            });
+            
+            html += '</div>';
+        }
+        
+        html += `
+                </div>
+            </div>
+        `;
+        
+        container.innerHTML = html;
+    } catch (error) {
+        container.innerHTML = '<div class="error">Failed to load blocked emails: ' + error.message + '</div>';
+    }
+}
+
+async function addBlockedEmail() {
+    const input = document.getElementById('new-blocked-email');
+    const email = input.value.trim();
+    
+    if (!email) {
+        alert('Please enter an email address');
+        return;
+    }
+    
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+        alert('Please enter a valid email address');
+        return;
+    }
+    
+    try {
+        const token = getAuthToken();
+        const response = await fetch(BACKEND_URL + '/api/admin/blocked-emails', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + token
+            },
+            body: JSON.stringify({ email })
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to block email');
+        }
+        
+        const result = await response.json();
+        showNotification(`Email ${email} has been blocked successfully`);
+        input.value = '';
+        await renderAdminBlockedEmails();
+    } catch (error) {
+        alert('Failed to block email: ' + error.message);
+    }
+}
+
+async function removeBlockedEmail(email) {
+    if (!confirm(`Are you sure you want to unblock "${email}"?`)) {
+        return;
+    }
+    
+    try {
+        const token = getAuthToken();
+        const response = await fetch(BACKEND_URL + '/api/admin/blocked-emails', {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + token
+            },
+            body: JSON.stringify({ email })
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to unblock email');
+        }
+        
+        const result = await response.json();
+        showNotification(`Email ${email} has been unblocked successfully`);
+        await renderAdminBlockedEmails();
+    } catch (error) {
+        alert('Failed to unblock email: ' + error.message);
+    }
+}
+
+async function testEmailBlocked() {
+    const input = document.getElementById('test-email-input');
+    const result = document.getElementById('test-email-result');
+    const email = input.value.trim();
+    
+    if (!email) {
+        result.innerHTML = '<div class="error">Please enter an email address to test</div>';
+        return;
+    }
+    
+    try {
+        const token = getAuthToken();
+        const response = await fetch(BACKEND_URL + '/api/admin/blocked-emails/check', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + token
+            },
+            body: JSON.stringify({ email })
+        });
+        
+        if (!response.ok) {
+            throw new Error('Failed to test email');
+        }
+        
+        const testResult = await response.json();
+        
+        let html = `
+            <div class="email-test-result">
+                <h5>Test Result for: ${escapeHtml(testResult.email)}</h5>
+                <p><strong>Status:</strong> ${testResult.isBlocked ? '<span style="color: red;">✗ BLOCKED</span>' : '<span style="color: green;">✓ NOT BLOCKED</span>'}</p>
+                <p><strong>Message:</strong> ${testResult.message}</p>
+            </div>
+        `;
+        
+        result.innerHTML = html;
+    } catch (error) {
+        result.innerHTML = '<div class="error">Failed to test email: ' + error.message + '</div>';
+    }
+}
+
+// Make blocked email functions globally available
+window.addBlockedEmail = addBlockedEmail;
+window.removeBlockedEmail = removeBlockedEmail;
+window.testEmailBlocked = testEmailBlocked;
 
 // Add debounced search and pagination support
 let searchTimeout;
