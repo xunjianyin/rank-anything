@@ -2205,11 +2205,26 @@ async function updateUserProfileWithPassword(userId, username, email, currentPas
 
 async function updateUserInfo(event) {
     event.preventDefault();
-    const newUsername = document.getElementById('user-space-username').value.trim();
-    const newEmail = document.getElementById('user-space-email').value.trim();
-    const currentPassword = document.getElementById('current-password').value;
-    const newPassword = document.getElementById('new-password').value;
-    const confirmNewPassword = document.getElementById('confirm-new-password').value;
+    
+    const newUsernameElement = document.getElementById('user-space-username');
+    const newEmailElement = document.getElementById('user-space-email');
+    const currentPasswordElement = document.getElementById('current-password');
+    const newPasswordElement = document.getElementById('new-password');
+    const confirmNewPasswordElement = document.getElementById('confirm-new-password');
+
+    // Username and email are required, so if their elements are missing, it's a critical issue.
+    if (!newUsernameElement || !newEmailElement) {
+        alert('User profile form is not loaded correctly. Please try refreshing the page.');
+        return;
+    }
+    const newUsername = newUsernameElement.value.trim();
+    const newEmail = newEmailElement.value.trim();
+
+    // Password fields might be optional to fill.
+    // If an element isn't found (is null), default its value to an empty string.
+    const currentPassword = currentPasswordElement ? currentPasswordElement.value : "";
+    const newPassword = newPasswordElement ? newPasswordElement.value : "";
+    const confirmNewPassword = confirmNewPasswordElement ? confirmNewPasswordElement.value : "";
     
     if (!newUsername || !newEmail) {
         alert('Username and email cannot be empty');
