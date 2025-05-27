@@ -1,6 +1,7 @@
 // Rank-Anything Web Application v2.0 with User Authentication
 // Set your backend API URL here:
 const BACKEND_URL = 'https://rank-anything.onrender.com';
+const API_BASE = BACKEND_URL + '/api';
 console.log('Rank-Anything v2.0 - Script loaded successfully');
 
 // Application state
@@ -270,16 +271,36 @@ function logout() {
 // Fix: Only decode JWT if present and valid
 async function checkUserSession() {
     const token = getAuthToken();
+    console.log('Checking user session, token:', token ? 'present' : 'missing');
+    
     if (token && token.split('.').length === 3) {
         try {
             const payload = JSON.parse(atob(token.split('.')[1]));
+            console.log('Token payload:', payload);
+            
+            // Check if token is expired
+            if (payload.exp && payload.exp < Date.now() / 1000) {
+                console.log('Token expired');
+                clearAuthToken();
+                currentUser = null;
+                updateUserInterface();
+                return;
+            }
+            
             currentUser = payload;
+            console.log('Current user set:', currentUser);
             resetDailyUsageIfNeeded();
             updateUserInterface();
         } catch (e) {
+            console.error('Error parsing token:', e);
             clearAuthToken();
             currentUser = null;
+            updateUserInterface();
         }
+    } else {
+        console.log('No valid token found');
+        currentUser = null;
+        updateUserInterface();
     }
 }
 
@@ -310,7 +331,11 @@ function updateUserInterface() {
         
         // Enable/disable buttons based on daily limits
         const usage = getCurrentDailyUsage();
-        if (addTopicBtn) addTopicBtn.disabled = usage.topics >= 4;
+        console.log('Daily usage:', usage);
+        if (addTopicBtn) {
+            addTopicBtn.disabled = usage.topics >= 4;
+            console.log('Add topic button disabled:', addTopicBtn.disabled, 'usage.topics:', usage.topics);
+        }
         if (addObjectBtn) addObjectBtn.disabled = usage.objects >= 32;
         if (submitRatingBtn) submitRatingBtn.disabled = usage.ratings >= 64;
         // Re-bind dropdown events after UI update
@@ -324,11 +349,15 @@ function updateUserInterface() {
             console.log('[DEBUG] userProfile NOT found');
         }
     } else {
+        console.log('No current user, disabling buttons');
         userInfo.style.display = 'none';
         authButtons.style.display = 'flex';
         
         // Disable all creation buttons for non-logged users
-        if (addTopicBtn) addTopicBtn.disabled = true;
+        if (addTopicBtn) {
+            addTopicBtn.disabled = true;
+            console.log('Add topic button disabled (no user)');
+        }
         if (addObjectBtn) addObjectBtn.disabled = true;
         if (submitRatingBtn) submitRatingBtn.disabled = true;
         // Hide admin badge and link
@@ -1288,11 +1317,25 @@ async function searchByTag(tag, event) {
 async function fetchTopics() {
     const res = await fetch(BACKEND_URL + '/api/topics');
     if (!res.ok) throw new Error('Failed to fetch topics');
-    return await res.json();
+    const data = await res.json();
+    
+    // Handle both old and new API response formats
+    if (data.topics) {
+        // New paginated format
+        return data.topics;
+    } else if (Array.isArray(data)) {
+        // Old format - return as is for backward compatibility
+        return data;
+    } else {
+        // Fallback
+        return [];
+    }
 }
 
 async function createTopic(name, tags) {
     const token = getAuthToken();
+    console.log('Creating topic:', { name, tags, token: token ? 'present' : 'missing' });
+    
     const res = await fetch(BACKEND_URL + '/api/topics', {
         method: 'POST',
         headers: {
@@ -1301,7 +1344,13 @@ async function createTopic(name, tags) {
         },
         body: JSON.stringify({ name, tags })
     });
-    if (!res.ok) throw new Error('Failed to create topic');
+    
+    if (!res.ok) {
+        const errorText = await res.text();
+        console.error('Create topic error:', res.status, errorText);
+        throw new Error(`Failed to create topic: ${res.status} ${errorText}`);
+    }
+    
     return await res.json();
 }
 
@@ -1386,17 +1435,26 @@ async function addTopic(event) {
     const tags = parseAndCleanTags(topicTagsStr);
     
     try {
+        console.log('Attempting to create topic:', topicName, 'with tags:', tags);
         await createTopic(topicName, tags);
+        
+        // Clear form
+        document.getElementById('topic-name').value = '';
+        document.getElementById('topic-tags').value = '';
+        
         renderTopics();
         hideAddTopicForm();
         showNotification('Topic created!');
     } catch (e) {
+        console.error('Error creating topic:', e);
+        
         // Check if it's a content filter error
         if (e.message.includes('sensitive content') || e.message.includes('inappropriate content')) {
             alert('Content Filter Error: ' + e.message + '\n\nPlease revise your topic name or tags to remove any inappropriate content.');
         } else {
             alert('Failed to create topic: ' + e.message);
         }
+        
         // Revert daily usage increment on failure
         const usage = getCurrentDailyUsage();
         usage.topics = Math.max(0, usage.topics - 1);
@@ -1411,7 +1469,19 @@ async function addTopic(event) {
 async function fetchObjects(topicId) {
     const res = await fetch(BACKEND_URL + `/api/topics/${topicId}/objects`);
     if (!res.ok) throw new Error('Failed to fetch objects');
-    return await res.json();
+    const data = await res.json();
+    
+    // Handle both old and new API response formats
+    if (data.objects) {
+        // New paginated format
+        return data.objects;
+    } else if (Array.isArray(data)) {
+        // Old format - return as is for backward compatibility
+        return data;
+    } else {
+        // Fallback
+        return [];
+    }
 }
 
 async function fetchObject(objectId) {
@@ -4759,7 +4829,19 @@ async function fetchTopics(page = 1, limit = 20, search = '', sortBy = 'created_
         params.append('search', search);
     }
     
-    return await cachedFetch(`${API_BASE}/topics?${params}`);
+    const response = await cachedFetch(`${API_BASE}/topics?${params}`);
+    
+    // Handle both old and new API response formats
+    if (response.topics) {
+        // New paginated format
+        return response.topics;
+    } else if (Array.isArray(response)) {
+        // Old format - return as is for backward compatibility
+        return response;
+    } else {
+        // Fallback
+        return [];
+    }
 }
 
 async function fetchObjects(topicId, page = 1, limit = 20, sortBy = 'created_at', sortOrder = 'DESC') {
@@ -4770,7 +4852,19 @@ async function fetchObjects(topicId, page = 1, limit = 20, sortBy = 'created_at'
         sortOrder
     });
     
-    return await cachedFetch(`${API_BASE}/topics/${topicId}/objects?${params}`);
+    const response = await cachedFetch(`${API_BASE}/topics/${topicId}/objects?${params}`);
+    
+    // Handle both old and new API response formats
+    if (response.objects) {
+        // New paginated format
+        return response.objects;
+    } else if (Array.isArray(response)) {
+        // Old format - return as is for backward compatibility
+        return response;
+    } else {
+        // Fallback
+        return [];
+    }
 }
 
 // Enhanced search input handler with debouncing
