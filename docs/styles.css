@@ -2517,130 +2517,58 @@ body {
 
 /* Introduction Page Styles */
 .introduction-container {
-    max-width: 800px;
+    max-width: 600px;
     margin: 0 auto;
-    padding: 2rem;
+    padding: 3rem 2rem;
     background: white;
-    border-radius: 12px;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
-    font-family: 'Inter', sans-serif;
+    border-radius: 16px;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.08);
+    font-family: 'Georgia', 'Times New Roman', serif;
     line-height: 1.8;
-}
-
-.introduction-header {
-    text-align: center;
-    margin-bottom: 3rem;
-    padding-bottom: 2rem;
-    border-bottom: 2px solid #e2e8f0;
-}
-
-.introduction-header h1 {
-    font-size: 2.5rem;
-    font-weight: 700;
-    color: #2d3748;
-    margin-bottom: 0.5rem;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-}
-
-.introduction-subtitle {
-    font-size: 1.2rem;
-    color: #718096;
-    font-weight: 400;
+    min-height: 60vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
 }
 
 .introduction-content {
+    display: flex;
+    flex-direction: column;
+    gap: 3rem;
     margin-bottom: 3rem;
-}
-
-.philosophy-section,
-.features-section,
-.dedication-section,
-.acknowledgments-section,
-.author-section {
-    margin-bottom: 3rem;
-}
-
-.philosophy-section h2,
-.features-section h2,
-.dedication-section h2,
-.acknowledgments-section h2 {
-    font-size: 1.8rem;
-    font-weight: 600;
-    color: #2d3748;
-    margin-bottom: 1.5rem;
-    padding-bottom: 0.5rem;
-    border-bottom: 1px solid #e2e8f0;
 }
 
 .philosophy-text {
-    font-size: 1.1rem;
-    line-height: 2;
-    color: #4a5568;
+    font-size: 1.2rem;
+    line-height: 2.2;
+    color: #2d3748;
     text-align: center;
-    padding: 2rem;
-    background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
-    border-radius: 12px;
-    border-left: 4px solid #667eea;
+    padding: 3rem 2rem;
+    background: linear-gradient(135deg, #f8fafc 0%, #edf2f7 100%);
+    border-radius: 16px;
+    border: none;
     font-style: italic;
+    font-weight: 400;
+    letter-spacing: 0.5px;
 }
 
 .philosophy-text p {
-    margin: 0.5rem 0;
-}
-
-.features-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-    gap: 1.5rem;
-    margin-top: 2rem;
-}
-
-.feature-card {
-    padding: 1.5rem;
-    background: #f8fafc;
-    border-radius: 12px;
-    border: 1px solid #e2e8f0;
-    transition: all 0.3s ease;
-    text-align: center;
-}
-
-.feature-card:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
-    border-color: #667eea;
-}
-
-.feature-card i {
-    font-size: 2.5rem;
-    color: #667eea;
-    margin-bottom: 1rem;
-}
-
-.feature-card h3 {
-    font-size: 1.2rem;
-    font-weight: 600;
-    color: #2d3748;
-    margin-bottom: 0.8rem;
-}
-
-.feature-card p {
-    color: #718096;
-    font-size: 0.95rem;
-    line-height: 1.6;
+    margin: 0.8rem 0;
+    font-weight: 300;
 }
 
 .dedication-content,
 .acknowledgments-content {
-    font-size: 1.05rem;
+    font-size: 1.1rem;
     color: #4a5568;
-    line-height: 1.8;
-    padding: 1.5rem;
-    background: #f7fafc;
-    border-radius: 8px;
-    border-left: 4px solid #764ba2;
+    line-height: 2;
+    padding: 2rem;
+    background: #fafbfc;
+    border-radius: 12px;
+    border: none;
+    text-align: center;
+    font-style: normal;
+    font-weight: 400;
 }
 
 .dedication-content a {
@@ -2656,37 +2584,39 @@ body {
 }
 
 .acknowledgments-content {
-    border-left-color: #38b2ac;
-    text-align: center;
     font-style: italic;
+    font-weight: 300;
 }
 
 .author-section {
     text-align: center;
-    margin-top: 3rem;
+    margin-top: 2rem;
 }
 
 .author-info {
-    padding: 1rem;
+    padding: 1.5rem;
 }
 
 .author-signature {
-    font-size: 1.1rem;
+    font-size: 1.2rem;
     color: #2d3748;
-    font-weight: 500;
-    margin-bottom: 0.5rem;
+    font-weight: 400;
+    margin-bottom: 0.8rem;
+    font-style: italic;
 }
 
 .creation-date {
-    font-size: 0.95rem;
+    font-size: 1rem;
     color: #718096;
-    font-style: italic;
+    font-style: normal;
+    font-weight: 300;
 }
 
 .introduction-footer {
     text-align: center;
     padding-top: 2rem;
-    border-top: 1px solid #e2e8f0;
+    border-top: 1px solid #e8edf2;
+    margin-top: auto;
 }
 
 /* Introduction Button (Fixed at bottom) */
@@ -2731,29 +2661,25 @@ body {
 @media (max-width: 768px) {
     .introduction-container {
         margin: 1rem;
-        padding: 1.5rem;
+        padding: 2rem 1.5rem;
+        min-height: 50vh;
     }
     
-    .introduction-header h1 {
-        font-size: 2rem;
-    }
-    
-    .introduction-subtitle {
-        font-size: 1rem;
-    }
-    
-    .features-grid {
-        grid-template-columns: 1fr;
-        gap: 1rem;
-    }
-    
-    .feature-card {
-        padding: 1.25rem;
+    .introduction-content {
+        gap: 2rem;
     }
     
     .philosophy-text {
+        padding: 2rem 1.5rem;
+        font-size: 1.1rem;
+        line-height: 2;
+    }
+    
+    .dedication-content,
+    .acknowledgments-content {
         padding: 1.5rem;
         font-size: 1rem;
+        line-height: 1.8;
     }
     
     .introduction-button-container {
@@ -2774,37 +2700,43 @@ body {
 @media (max-width: 480px) {
     .introduction-container {
         margin: 0.5rem;
-        padding: 1rem;
+        padding: 1.5rem 1rem;
+        min-height: 40vh;
     }
     
-    .introduction-header {
+    .introduction-content {
+        gap: 1.5rem;
         margin-bottom: 2rem;
-        padding-bottom: 1.5rem;
-    }
-    
-    .introduction-header h1 {
-        font-size: 1.8rem;
-    }
-    
-    .philosophy-section h2,
-    .features-section h2,
-    .dedication-section h2,
-    .acknowledgments-section h2 {
-        font-size: 1.5rem;
-    }
-    
-    .feature-card i {
-        font-size: 2rem;
     }
     
     .philosophy-text {
-        padding: 1rem;
-        font-size: 0.95rem;
+        padding: 1.5rem 1rem;
+        font-size: 1rem;
+        line-height: 1.8;
+        letter-spacing: 0.3px;
+    }
+    
+    .philosophy-text p {
+        margin: 0.6rem 0;
     }
     
     .dedication-content,
     .acknowledgments-content {
+        padding: 1.25rem;
+        font-size: 0.95rem;
+        line-height: 1.7;
+    }
+    
+    .author-info {
         padding: 1rem;
-        font-size: 1rem;
+    }
+    
+    .author-signature {
+        font-size: 1.1rem;
+        margin-bottom: 0.6rem;
+    }
+    
+    .creation-date {
+        font-size: 0.9rem;
     }
 } 
