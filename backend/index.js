@@ -878,6 +878,23 @@ app.get('/api/topics', (req, res) => {
   });
 });
 
+// Get a specific topic by ID
+app.get('/api/topics/:id', (req, res) => {
+  const topicId = req.params.id;
+  
+  db.get(`
+    SELECT t.*, u.username as creator_username,
+           (SELECT COUNT(*) FROM objects WHERE topic_id = t.id) as object_count
+    FROM topics t
+    LEFT JOIN users u ON t.creator_id = u.id
+    WHERE t.id = ?
+  `, [topicId], (err, row) => {
+    if (err) return res.status(500).json({ error: 'Database error.' });
+    if (!row) return res.status(404).json({ error: 'Topic not found.' });
+    res.json(row);
+  });
+});
+
 // Get edit history for a topic or object
 app.get('/api/edit-history/:targetType/:targetId', (req, res) => {
   const { targetType, targetId } = req.params;
@@ -1279,6 +1296,28 @@ app.post('/api/topics/:topicId/objects', authenticateToken, validateContent, asy
     res.status(500).json({ error: 'Database error.' });
   }
 });
+
+// Get a specific object by ID
+app.get('/api/objects/:id', (req, res) => {
+  const objectId = req.params.id;
+  
+  db.get(`
+    SELECT o.*, u.username as creator_username, t.name as topic_name,
+           COALESCE(AVG(r.rating), 0) as avg_rating,
+           COUNT(r.id) as rating_count
+    FROM objects o
+    LEFT JOIN users u ON o.creator_id = u.id
+    LEFT JOIN topics t ON o.topic_id = t.id
+    LEFT JOIN ratings r ON o.id = r.object_id
+    WHERE o.id = ?
+    GROUP BY o.id
+  `, [objectId], (err, row) => {
+    if (err) return res.status(500).json({ error: 'Database error.' });
+    if (!row) return res.status(404).json({ error: 'Object not found.' });
+    res.json(row);
+  });
+});
+
 // Edit an object (only creator or admin)
 app.put('/api/objects/:id', authenticateToken, validateContent, (req, res) => {
   const { name } = req.body; // Only name is editable for an object directly

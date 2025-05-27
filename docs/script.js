@@ -694,6 +694,20 @@ async function showTopicPage(topicId) {
         
         document.getElementById('topic-title').textContent = topic.name;
         
+        // Add creator information to the topic header if not already present
+        const topicHeaderContent = document.querySelector('.topic-header-content');
+        let creatorInfo = topicHeaderContent.querySelector('.topic-creator-info');
+        if (!creatorInfo) {
+            creatorInfo = document.createElement('div');
+            creatorInfo.className = 'topic-creator-info';
+            creatorInfo.style.marginTop = '0.5rem';
+            topicHeaderContent.insertBefore(creatorInfo, topicHeaderContent.querySelector('.topic-tags-display'));
+        }
+        
+        // Render creator information
+        const editorsDisplay = await renderEditorsDisplay('topic', topic.id, topic.creator_username || '', topic.creator_id);
+        creatorInfo.innerHTML = `<small style="color: #666;">${editorsDisplay}</small>`;
+        
         // Display topic tags
         await renderTopicTags();
         
@@ -722,6 +736,9 @@ async function showObjectPage(objectId) {
             document.getElementById('object-title').textContent = 'Object not found';
             return;
         }
+        
+        // Set the current topic ID from the object data
+        currentTopicId = object.topic_id;
         
         document.getElementById('object-title').textContent = object.name;
         
@@ -939,6 +956,7 @@ function updateObjectActions(object) {
                     alert('Failed to create proposal: ' + error.message);
                 }
             };
+            deleteBtn.parentNode.insertBefore(proposeDeleteBtn, deleteBtn.nextSibling);
         }
     }
 }
@@ -1516,14 +1534,15 @@ async function fetchObjects(topicId) {
 }
 
 async function fetchObject(objectId) {
-    // Since we don't have a direct object endpoint, we'll fetch from the current topic
-    const objects = await fetchObjects(currentTopicId);
-    return objects.find(obj => obj.id == objectId);
+    const res = await fetch(BACKEND_URL + `/api/objects/${objectId}`);
+    if (!res.ok) throw new Error('Failed to fetch object');
+    return await res.json();
 }
 
 async function fetchTopic(topicId) {
-    const topics = await fetchTopics();
-    return topics.find(topic => topic.id == topicId);
+    const res = await fetch(BACKEND_URL + `/api/topics/${topicId}`);
+    if (!res.ok) throw new Error('Failed to fetch topic');
+    return await res.json();
 }
 
 async function fetchTopicTags(topicId) {
@@ -1690,6 +1709,19 @@ async function renderObjectDetails() {
         const ratings = await fetchRatings(currentObjectId);
         const averageRating = calculateAverageRating(ratings);
         const ratingCount = ratings.length;
+        
+        // Add creator information to the object header if not already present
+        const objectHeader = document.querySelector('.object-header');
+        let creatorInfo = objectHeader.querySelector('.object-creator-info');
+        if (!creatorInfo) {
+            creatorInfo = document.createElement('div');
+            creatorInfo.className = 'object-creator-info';
+            objectHeader.insertBefore(creatorInfo, objectHeader.querySelector('.object-actions'));
+        }
+        
+        // Render creator information
+        const editorsDisplay = await renderEditorsDisplay('object', object.id, object.creator_username || '', object.creator_id);
+        creatorInfo.innerHTML = `<small style="color: #666; margin-left: 0.5rem;">${editorsDisplay}</small>`;
         
         // Render tags using the new API function
         await renderObjectTags();
