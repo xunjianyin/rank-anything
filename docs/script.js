@@ -2743,6 +2743,7 @@ async function renderAdminPanel() {
                     <button class="admin-tab active" onclick="showAdminTab('users')">User Management</button>
                     <button class="admin-tab" onclick="showAdminTab('content-filter')">Content Filter</button>
                     <button class="admin-tab" onclick="showAdminTab('blocked-emails')">Blocked Emails</button>
+                    <button class="admin-tab" onclick="showAdminTab('domain-restrictions')">Domain Restrictions</button>
                 </div>
                 <div id="admin-users-tab" class="admin-tab-content active">
                     <h3>All Users</h3>
@@ -2756,6 +2757,10 @@ async function renderAdminPanel() {
                     <h3>Blocked Email Management</h3>
                     <div id='admin-blocked-emails-content'>Loading...</div>
                 </div>
+                <div id="admin-domain-restrictions-tab" class="admin-tab-content" style="display: none;">
+                    <h3>Email Domain Restrictions</h3>
+                    <div id='admin-domain-restrictions-content'>Loading...</div>
+                </div>
             </div>
         </div>
     `;
@@ -2763,6 +2768,7 @@ async function renderAdminPanel() {
     await renderAdminUsersList();
     await renderAdminContentFilter();
     await renderAdminBlockedEmails();
+    await renderAdminDomainRestrictions();
 }
 
 async function renderAdminUsersList() {
@@ -4725,6 +4731,237 @@ async function testEmailBlocked() {
 window.addBlockedEmail = addBlockedEmail;
 window.removeBlockedEmail = removeBlockedEmail;
 window.testEmailBlocked = testEmailBlocked;
+
+// Email Domain Restriction Management Functions
+async function renderAdminDomainRestrictions() {
+    const container = document.getElementById('admin-domain-restrictions-content');
+    
+    try {
+        const token = getAuthToken();
+        const response = await fetch(BACKEND_URL + '/api/admin/domain-restrictions', {
+            headers: { 'Authorization': 'Bearer ' + token }
+        });
+        
+        if (!response.ok) {
+            throw new Error('Failed to fetch domain restrictions');
+        }
+        
+        const settings = await response.json();
+        
+        let html = `
+            <div class="domain-restrictions-management">
+                <!-- Current Status -->
+                <div class="domain-restrictions-status">
+                    <h4>Current Status</h4>
+                    <div class="status-display" style="padding: 15px; border: 2px solid ${settings.enabled ? '#dc2626' : '#16a34a'}; border-radius: 8px; background: ${settings.enabled ? '#fef2f2' : '#f0fdf4'};">
+                        <div style="display: flex; align-items: center; margin-bottom: 10px;">
+                            <span style="font-size: 18px; margin-right: 8px;">${settings.enabled ? '🔒' : '🔓'}</span>
+                            <strong style="color: ${settings.enabled ? '#dc2626' : '#16a34a'};">
+                                ${settings.enabled ? 'RESTRICTED' : 'UNRESTRICTED'}
+                            </strong>
+                        </div>
+                        ${settings.enabled ? `
+                            <p style="margin: 5px 0;"><strong>Allowed domains:</strong> ${settings.allowedDomains.join(', ')}</p>
+                            <p style="margin: 5px 0; font-style: italic;">"${settings.message}"</p>
+                        ` : `
+                            <p style="margin: 5px 0;">All email domains are currently allowed for registration.</p>
+                        `}
+                    </div>
+                </div>
+                
+                <!-- Quick Toggle -->
+                <div class="domain-restrictions-toggle" style="margin: 20px 0;">
+                    <h4>Quick Toggle</h4>
+                    <button class="btn ${settings.enabled ? 'btn-danger' : 'btn-success'}" onclick="toggleDomainRestrictions(${!settings.enabled})">
+                        ${settings.enabled ? '🔓 Disable Restrictions' : '🔒 Enable Restrictions'}
+                    </button>
+                    <p style="color: #666; font-size: 14px; margin-top: 5px;">
+                        ${settings.enabled ? 'This will allow all email domains to register' : 'This will restrict registration to .edu and .edu.cn domains'}
+                    </p>
+                </div>
+                
+                <!-- Test Email -->
+                <div class="domain-restrictions-test" style="margin: 20px 0;">
+                    <h4>Test Email Domain</h4>
+                    <div class="test-email-form">
+                        <input type="email" id="test-domain-email" placeholder="Enter email to test" style="width: 300px; margin-right: 10px;">
+                        <button class="btn btn-secondary" onclick="testEmailDomain()">Test Email</button>
+                    </div>
+                    <div id="test-domain-result" style="margin-top: 10px;"></div>
+                </div>
+                
+                <!-- Advanced Settings -->
+                <div class="domain-restrictions-advanced" style="margin: 20px 0;">
+                    <h4>Advanced Settings</h4>
+                    <div class="advanced-settings-form" style="border: 1px solid #ddd; padding: 15px; border-radius: 5px; background: #f9f9f9;">
+                        <div class="form-group" style="margin-bottom: 15px;">
+                            <label for="restriction-enabled" style="display: block; font-weight: bold; margin-bottom: 5px;">Enable Restrictions:</label>
+                            <select id="restriction-enabled" style="width: 200px;">
+                                <option value="true" ${settings.enabled ? 'selected' : ''}>Enabled</option>
+                                <option value="false" ${!settings.enabled ? 'selected' : ''}>Disabled</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-group" style="margin-bottom: 15px;">
+                            <label for="allowed-domains" style="display: block; font-weight: bold; margin-bottom: 5px;">Allowed Domains:</label>
+                            <input type="text" id="allowed-domains" placeholder="e.g., .edu, .edu.cn, .ac.uk" 
+                                   value="${settings.allowedDomains.join(', ')}" style="width: 400px;">
+                            <p style="color: #666; font-size: 12px; margin-top: 2px;">Enter domains separated by commas. Each domain must start with a dot.</p>
+                        </div>
+                        
+                        <div class="form-group" style="margin-bottom: 15px;">
+                            <label for="restriction-message" style="display: block; font-weight: bold; margin-bottom: 5px;">Restriction Message:</label>
+                            <textarea id="restriction-message" rows="3" style="width: 100%;" placeholder="Message shown to users when their email domain is not allowed">${settings.message}</textarea>
+                        </div>
+                        
+                        <button class="btn btn-primary" onclick="updateDomainRestrictions()">Update Settings</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        container.innerHTML = html;
+    } catch (error) {
+        container.innerHTML = '<div class="error">Failed to load domain restrictions: ' + error.message + '</div>';
+    }
+}
+
+async function toggleDomainRestrictions(enabled) {
+    try {
+        const token = getAuthToken();
+        const response = await fetch(BACKEND_URL + '/api/admin/domain-restrictions', {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + token
+            },
+            body: JSON.stringify({ enabled })
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to toggle domain restrictions');
+        }
+        
+        const result = await response.json();
+        showNotification(`Domain restrictions ${enabled ? 'enabled' : 'disabled'} successfully`);
+        await renderAdminDomainRestrictions();
+    } catch (error) {
+        alert('Failed to toggle domain restrictions: ' + error.message);
+    }
+}
+
+async function updateDomainRestrictions() {
+    const enabled = document.getElementById('restriction-enabled').value === 'true';
+    const domainsText = document.getElementById('allowed-domains').value.trim();
+    const message = document.getElementById('restriction-message').value.trim();
+    
+    if (!message) {
+        alert('Please enter a restriction message');
+        return;
+    }
+    
+    // Parse and validate domains
+    let allowedDomains = [];
+    if (domainsText) {
+        allowedDomains = domainsText.split(',').map(d => d.trim()).filter(d => d);
+        
+        // Validate each domain
+        for (const domain of allowedDomains) {
+            if (!domain.startsWith('.')) {
+                alert(`Invalid domain "${domain}". Domains must start with a dot (e.g., ".edu")`);
+                return;
+            }
+        }
+    }
+    
+    if (enabled && allowedDomains.length === 0) {
+        alert('Please enter at least one allowed domain when restrictions are enabled');
+        return;
+    }
+    
+    try {
+        const token = getAuthToken();
+        const response = await fetch(BACKEND_URL + '/api/admin/domain-restrictions', {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + token
+            },
+            body: JSON.stringify({ enabled, allowedDomains, message })
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to update domain restrictions');
+        }
+        
+        const result = await response.json();
+        showNotification('Domain restriction settings updated successfully');
+        await renderAdminDomainRestrictions();
+    } catch (error) {
+        alert('Failed to update domain restrictions: ' + error.message);
+    }
+}
+
+async function testEmailDomain() {
+    const input = document.getElementById('test-domain-email');
+    const result = document.getElementById('test-domain-result');
+    const email = input.value.trim();
+    
+    if (!email) {
+        result.innerHTML = '<div class="error">Please enter an email address to test</div>';
+        return;
+    }
+    
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+        result.innerHTML = '<div class="error">Please enter a valid email address</div>';
+        return;
+    }
+    
+    try {
+        const token = getAuthToken();
+        const response = await fetch(BACKEND_URL + '/api/admin/domain-restrictions/test', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + token
+            },
+            body: JSON.stringify({ email })
+        });
+        
+        if (!response.ok) {
+            throw new Error('Failed to test email domain');
+        }
+        
+        const testResult = await response.json();
+        
+        let html = `
+            <div class="domain-test-result">
+                <h5>Test Result for: ${escapeHtml(testResult.email)}</h5>
+                <p><strong>Status:</strong> ${testResult.allowed ? '<span style="color: green;">✓ ALLOWED</span>' : '<span style="color: red;">✗ BLOCKED</span>'}</p>
+                <p><strong>Message:</strong> ${testResult.message}</p>
+                
+                <div style="margin-top: 10px; padding: 10px; background: #f8f9fa; border-radius: 4px; font-size: 14px;">
+                    <strong>Current Settings:</strong><br>
+                    Restrictions: ${testResult.currentSettings.enabled ? 'Enabled' : 'Disabled'}<br>
+                    ${testResult.currentSettings.enabled ? `Allowed domains: ${testResult.currentSettings.allowedDomains.join(', ')}` : 'All domains allowed'}
+                </div>
+            </div>
+        `;
+        
+        result.innerHTML = html;
+    } catch (error) {
+        result.innerHTML = '<div class="error">Failed to test email domain: ' + error.message + '</div>';
+    }
+}
+
+// Make domain restriction functions globally available
+window.toggleDomainRestrictions = toggleDomainRestrictions;
+window.updateDomainRestrictions = updateDomainRestrictions;
+window.testEmailDomain = testEmailDomain;
 
 // Add debounced search and pagination support
 let searchTimeout;

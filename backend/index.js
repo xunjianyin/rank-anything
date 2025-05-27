@@ -51,6 +51,54 @@ function getBlockedEmails() {
   return [...BLOCKED_EMAILS];
 }
 
+// Email domain restrictions
+const EMAIL_DOMAIN_RESTRICTION = {
+  enabled: true, // Set to false to disable restrictions
+  allowedDomains: ['.edu.cn', '.edu'], // Only these domain endings are allowed
+  message: 'Registration is currently restricted to educational institutions. Only .edu and .edu.cn email addresses are allowed.'
+};
+
+// Function to check if email domain is allowed
+function isEmailDomainAllowed(email) {
+  if (!EMAIL_DOMAIN_RESTRICTION.enabled) {
+    return { allowed: true };
+  }
+  
+  const emailLower = email.toLowerCase();
+  const isAllowed = EMAIL_DOMAIN_RESTRICTION.allowedDomains.some(domain => 
+    emailLower.endsWith(domain)
+  );
+  
+  return {
+    allowed: isAllowed,
+    message: isAllowed ? null : EMAIL_DOMAIN_RESTRICTION.message
+  };
+}
+
+// Function to get domain restriction status
+function getDomainRestrictionStatus() {
+  return {
+    enabled: EMAIL_DOMAIN_RESTRICTION.enabled,
+    allowedDomains: [...EMAIL_DOMAIN_RESTRICTION.allowedDomains],
+    message: EMAIL_DOMAIN_RESTRICTION.message
+  };
+}
+
+// Function to update domain restriction settings
+function updateDomainRestriction(enabled, allowedDomains = null, message = null) {
+  EMAIL_DOMAIN_RESTRICTION.enabled = enabled;
+  
+  if (allowedDomains !== null) {
+    EMAIL_DOMAIN_RESTRICTION.allowedDomains = [...allowedDomains];
+  }
+  
+  if (message !== null) {
+    EMAIL_DOMAIN_RESTRICTION.message = message;
+  }
+  
+  return getDomainRestrictionStatus();
+}
+
 // Email configuration with multiple fallbacks
 const EMAIL_CONFIGS = [
   // Primary: Gmail (most reliable if credentials are provided)
@@ -287,6 +335,17 @@ app.get('/api/email-status', (req, res) => {
   });
 });
 
+// Public endpoint to check domain restriction status
+app.get('/api/domain-restrictions', (req, res) => {
+  const status = getDomainRestrictionStatus();
+  // Only return public information
+  res.json({
+    enabled: status.enabled,
+    allowedDomains: status.enabled ? status.allowedDomains : null,
+    message: status.enabled ? status.message : null
+  });
+});
+
 // Reset email service (admin only)
 app.post('/api/admin/reset-email-service', authenticateToken, (req, res) => {
   if (!req.user.isAdmin) {
@@ -349,6 +408,12 @@ app.post('/api/register', validateContent, async (req, res) => {
   // Check if email is blocked
   if (isEmailBlocked(email)) {
     return res.status(403).json({ error: 'This email address is not allowed to register.' });
+  }
+
+  // Check email domain restrictions
+  const domainCheck = isEmailDomainAllowed(email);
+  if (!domainCheck.allowed) {
+    return res.status(403).json({ error: domainCheck.message });
   }
 
   // Validate password
@@ -2390,6 +2455,74 @@ app.post('/api/admin/blocked-emails/check', authenticateToken, (req, res) => {
     email: email.toLowerCase(),
     isBlocked: blocked,
     message: blocked ? 'Email is blocked' : 'Email is not blocked'
+  });
+});
+
+// --- Email Domain Restriction Management Endpoints ---
+
+// Get domain restriction status
+app.get('/api/admin/domain-restrictions', authenticateToken, (req, res) => {
+  if (!req.user.isAdmin) return res.status(403).json({ error: 'Admin access required.' });
+  
+  res.json(getDomainRestrictionStatus());
+});
+
+// Update domain restriction settings
+app.put('/api/admin/domain-restrictions', authenticateToken, (req, res) => {
+  if (!req.user.isAdmin) return res.status(403).json({ error: 'Admin access required.' });
+  
+  const { enabled, allowedDomains, message } = req.body;
+  
+  // Validate enabled flag
+  if (typeof enabled !== 'boolean') {
+    return res.status(400).json({ error: 'enabled must be a boolean value.' });
+  }
+  
+  // Validate allowedDomains if provided
+  if (allowedDomains !== undefined) {
+    if (!Array.isArray(allowedDomains)) {
+      return res.status(400).json({ error: 'allowedDomains must be an array.' });
+    }
+    
+    // Validate each domain
+    for (const domain of allowedDomains) {
+      if (typeof domain !== 'string' || !domain.startsWith('.')) {
+        return res.status(400).json({ error: 'Each domain must be a string starting with a dot (e.g., ".edu").' });
+      }
+    }
+  }
+  
+  // Validate message if provided
+  if (message !== undefined && typeof message !== 'string') {
+    return res.status(400).json({ error: 'message must be a string.' });
+  }
+  
+  const updatedSettings = updateDomainRestriction(enabled, allowedDomains, message);
+  
+  res.json({
+    message: 'Domain restriction settings updated successfully.',
+    settings: updatedSettings
+  });
+});
+
+// Test email against domain restrictions
+app.post('/api/admin/domain-restrictions/test', authenticateToken, (req, res) => {
+  if (!req.user.isAdmin) return res.status(403).json({ error: 'Admin access required.' });
+  
+  const { email } = req.body;
+  
+  if (!email || typeof email !== 'string') {
+    return res.status(400).json({ error: 'Email is required.' });
+  }
+  
+  const domainCheck = isEmailDomainAllowed(email);
+  const settings = getDomainRestrictionStatus();
+  
+  res.json({
+    email: email.toLowerCase(),
+    allowed: domainCheck.allowed,
+    message: domainCheck.message || 'Email domain is allowed',
+    currentSettings: settings
   });
 });
 
