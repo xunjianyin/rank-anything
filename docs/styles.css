@@ -353,11 +353,10 @@ body {
 
 /* Footer */
 .footer {
-    background: #2d3748;
-    color: #a0aec0;
+    color: #718096;
     padding: 1.5rem 0;
     margin-top: auto;
-    border-top: 1px solid #4a5568;
+    border-top: 1px solid #e2e8f0;
 }
 
 .footer-content {
@@ -368,7 +367,7 @@ body {
     font-size: 0.9rem;
     font-weight: 400;
     margin: 0;
-    opacity: 0.8;
+    opacity: 0.7;
     letter-spacing: 0.5px;
 }
 
@@ -2579,11 +2578,11 @@ body {
 }
 
 .philosophy-text {
-    font-size: 1.2rem;
-    line-height: 2.2;
+    font-size: 1rem;
+    line-height: 1.8;
     color: #2d3748;
     text-align: center;
-    padding: 3rem 2rem;
+    padding: 2.5rem 2rem;
     background: linear-gradient(135deg, #f8fafc 0%, #edf2f7 100%);
     border-radius: 16px;
     border: none;
@@ -2593,16 +2592,16 @@ body {
 }
 
 .philosophy-text p {
-    margin: 0.6rem 0;
+    margin: 0.4rem 0;
     font-weight: 300;
 }
 
 .dedication-content,
 .acknowledgments-content {
-    font-size: 1.05rem;
+    font-size: 0.95rem;
     color: #4a5568;
-    line-height: 2;
-    padding: 2rem;
+    line-height: 1.7;
+    padding: 1.8rem;
     background: #fafbfc;
     border-radius: 12px;
     border: none;
@@ -2638,19 +2637,19 @@ body {
 }
 
 .author-signature {
-    font-size: 1.2rem;
+    font-size: 1rem;
     color: #2d3748;
     font-weight: 400;
-    margin-bottom: 0.4rem;
+    margin-bottom: 0.3rem;
     font-style: italic;
 }
 
 .creation-date {
-    font-size: 1rem;
+    font-size: 0.9rem;
     color: #718096;
     font-style: normal;
     font-weight: 300;
-    margin-top: 1rem;
+    margin-top: 0.8rem;
 }
 
 .introduction-footer {
@@ -2678,43 +2677,43 @@ body {
 }
 
 .philosophy-text .chinese {
-    font-size: 1.25rem;
+    font-size: 1.05rem;
     font-weight: 500;
     color: #2d3748;
 }
 
 .philosophy-text .english {
-    font-size: 1.1rem;
+    font-size: 0.95rem;
     color: #4a5568;
     font-style: italic;
 }
 
 .dedication-content .chinese,
 .acknowledgments-content .chinese {
-    font-size: 1.1rem;
+    font-size: 1rem;
     font-weight: 400;
     color: #2d3748;
-    margin-bottom: 0.4rem !important;
+    margin-bottom: 0.3rem !important;
 }
 
 .dedication-content .english,
 .acknowledgments-content .english {
-    font-size: 1rem;
+    font-size: 0.9rem;
     color: #5a6573;
-    margin-bottom: 1.2rem !important;
+    margin-bottom: 1rem !important;
 }
 
 .author-signature.chinese {
     font-family: 'Noto Serif SC', 'Source Han Serif SC', 'Source Han Serif CN', 'Songti SC', 'SimSun', serif;
-    font-size: 1.25rem;
-    margin-bottom: 0.2rem;
+    font-size: 1.05rem;
+    margin-bottom: 0.15rem;
 }
 
 .author-signature.english {
     font-family: 'Playfair Display', 'Georgia', 'Times New Roman', serif;
-    font-size: 1.1rem;
+    font-size: 0.95rem;
     opacity: 0.8;
-    margin-bottom: 0.8rem;
+    margin-bottom: 0.6rem;
 }
 
 /* Introduction Button (Fixed at bottom) */
@@ -2768,34 +2767,34 @@ body {
     }
     
     .philosophy-text {
-        padding: 2rem 1.5rem;
-        font-size: 1.1rem;
-        line-height: 2;
+        padding: 1.8rem 1.5rem;
+        font-size: 0.95rem;
+        line-height: 1.7;
     }
     
     .philosophy-text .chinese {
-        font-size: 1.15rem;
+        font-size: 1rem;
     }
     
     .philosophy-text .english {
-        font-size: 1rem;
+        font-size: 0.9rem;
     }
     
     .dedication-content,
     .acknowledgments-content {
-        padding: 1.5rem;
-        font-size: 1rem;
-        line-height: 1.8;
+        padding: 1.4rem;
+        font-size: 0.9rem;
+        line-height: 1.6;
     }
     
     .dedication-content .chinese,
     .acknowledgments-content .chinese {
-        font-size: 1.05rem;
+        font-size: 0.95rem;
     }
     
     .dedication-content .english,
     .acknowledgments-content .english {
-        font-size: 0.95rem;
+        font-size: 0.85rem;
     }
     
     .introduction-button-container {
@@ -2826,56 +2825,56 @@ body {
     }
     
     .philosophy-text {
-        padding: 1.5rem 1rem;
-        font-size: 1rem;
-        line-height: 1.8;
+        padding: 1.3rem 1rem;
+        font-size: 0.9rem;
+        line-height: 1.6;
         letter-spacing: 0.2px;
     }
     
     .philosophy-text .chinese {
-        font-size: 1.1rem;
-        margin-bottom: 0.2rem !important;
+        font-size: 0.95rem;
+        margin-bottom: 0.15rem !important;
     }
     
     .philosophy-text .english {
-        font-size: 0.95rem;
-        margin-bottom: 0.8rem !important;
+        font-size: 0.85rem;
+        margin-bottom: 0.7rem !important;
     }
     
     .dedication-content,
     .acknowledgments-content {
-        padding: 1.25rem;
-        font-size: 0.95rem;
-        line-height: 1.7;
+        padding: 1.1rem;
+        font-size: 0.85rem;
+        line-height: 1.5;
     }
     
     .dedication-content .chinese,
     .acknowledgments-content .chinese {
-        font-size: 1rem;
-        margin-bottom: 0.3rem !important;
+        font-size: 0.9rem;
+        margin-bottom: 0.25rem !important;
     }
     
     .dedication-content .english,
     .acknowledgments-content .english {
-        font-size: 0.9rem;
-        margin-bottom: 1rem !important;
+        font-size: 0.8rem;
+        margin-bottom: 0.9rem !important;
     }
     
     .author-info {
-        padding: 1rem;
+        padding: 0.9rem;
     }
     
     .author-signature.chinese {
-        font-size: 1.15rem;
+        font-size: 0.95rem;
         margin-bottom: 0.1rem;
     }
     
     .author-signature.english {
-        font-size: 1rem;
-        margin-bottom: 0.6rem;
+        font-size: 0.85rem;
+        margin-bottom: 0.5rem;
     }
     
     .creation-date {
-        font-size: 0.9rem;
+        font-size: 0.8rem;
     }
 } 
