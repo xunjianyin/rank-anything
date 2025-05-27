@@ -378,10 +378,10 @@ function resetDailyUsageIfNeeded() {
     if (!currentUser) return;
     
     const today = new Date().toDateString();
-    const userUsage = data.dailyUsage[currentUser.username];
+    const userUsage = data.dailyUsage[currentUser.id]; // Changed from currentUser.username
     
     if (!userUsage || userUsage.date !== today) {
-        data.dailyUsage[currentUser.username] = {
+        data.dailyUsage[currentUser.id] = { // Changed from currentUser.username
             date: today,
             topics: 0,
             objects: 0,
@@ -393,7 +393,7 @@ function resetDailyUsageIfNeeded() {
 
 function getCurrentDailyUsage() {
     if (!currentUser) return { topics: 0, objects: 0, ratings: 0 };
-    return data.dailyUsage[currentUser.username] || { topics: 0, objects: 0, ratings: 0 };
+    return data.dailyUsage[currentUser.id] || { topics: 0, objects: 0, ratings: 0 }; // Changed from currentUser.username
 }
 
 function incrementDailyUsage(type) {
@@ -413,7 +413,7 @@ function incrementDailyUsage(type) {
     }
     
     usage[type]++;
-    data.dailyUsage[currentUser.username] = usage;
+    data.dailyUsage[currentUser.id] = usage; // Changed from currentUser.username
     saveData();
     updateDailyLimitsDisplay();
     updateUserInterface();
@@ -1488,7 +1488,7 @@ async function addTopic(event) {
         if (!currentUser.isAdmin) {
             const usage = getCurrentDailyUsage();
             usage.topics = Math.max(0, usage.topics - 1);
-            data.dailyUsage[currentUser.username] = usage;
+            data.dailyUsage[currentUser.id] = usage;
             saveData();
             updateDailyLimitsDisplay();
             updateUserInterface();
@@ -1675,7 +1675,7 @@ async function addObject(event) {
         if (!currentUser.isAdmin) {
             const usage = getCurrentDailyUsage();
             usage.objects = Math.max(0, usage.objects - 1);
-            data.dailyUsage[currentUser.username] = usage;
+            data.dailyUsage[currentUser.id] = usage;
             saveData();
             updateDailyLimitsDisplay();
             updateUserInterface();
@@ -2025,7 +2025,7 @@ async function renderUserSpacePage() {
                         </div>
                         <div class="form-group">
                             <label for="user-space-email">Email</label>
-                            <input type="email" id="user-space-email" value="${escapeHtml(currentUser.email)}" required>
+                            <input type="email" id="user-space-email" value="${escapeHtml(currentUser.email)}" required readonly>
                         </div>
                         <div class="form-actions">
                             <button type="submit" class="btn btn-primary">Update Profile</button>
