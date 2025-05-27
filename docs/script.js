@@ -2013,7 +2013,6 @@ async function renderUserSpacePage() {
         const stats = await fetchUserStats(currentUser.id);
         
         let html = `
-            <div class="user-space-main">
                 <h2>User Space - ${escapeHtml(currentUser.username)}</h2>
                 
                 <!-- User Profile Section -->
@@ -2078,7 +2077,6 @@ async function renderUserSpacePage() {
                         <canvas id="user-daily-chart" width="400" height="200"></canvas>
                     </div>
                 </div>
-            </div>
         `;
         
         container.innerHTML = html;
@@ -2403,7 +2401,7 @@ function renderUserDailyChart(dailyStats) {
     
     const chartElement = document.getElementById('user-daily-chart');
     if (!chartElement) {
-        console.error('Chart canvas element not found');
+        console.log('Chart canvas element not found - chart will be rendered when user space page is opened');
         return;
     }
     const ctx = chartElement.getContext('2d');
@@ -2613,7 +2611,7 @@ async function removeUserRatingUI(userId) {
 // Make username clickable function
 function makeUsernameClickable(username, userId) {
     if (!userId) return escapeHtml(username);
-    return `<span class="clickable-username" onclick="showUserProfilePage('${userId}')">${escapeHtml(username)}</span>`;
+    return `<span class="clickable-username" onclick="event.stopPropagation(); showUserProfilePage('${userId}')">${escapeHtml(username)}</span>`;
 }
 
 // Render editors display with ellipsis for more than 3 editors
