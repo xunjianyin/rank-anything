@@ -2665,8 +2665,9 @@ async function removeUserRatingUI(userId) {
 
 // Make username clickable function
 function makeUsernameClickable(username, userId) {
-    if (!userId) return escapeHtml(username);
-    return `<span class="clickable-username" onclick="event.stopPropagation(); showUserProfilePage('${userId}')">${escapeHtml(username)}</span>`;
+    const displayName = username && username.trim() ? escapeHtml(username) : 'Unknown User';
+    if (!userId) return displayName;
+    return `<span class="clickable-username" onclick="event.stopPropagation(); showUserProfilePage('${userId}')">${displayName}</span>`;
 }
 
 // Render editors display with ellipsis for more than 3 editors
