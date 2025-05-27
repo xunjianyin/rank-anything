@@ -1418,6 +1418,7 @@ async function renderTopics() {
 // Replace addTopic to use API
 async function addTopic(event) {
     event.preventDefault();
+    console.log('addTopic called, currentUser:', currentUser);
     if (!currentUser) {
         alert('Please login to add topics');
         return;
@@ -4891,5 +4892,17 @@ async function performAdvancedSearch() {
     await performOptimizedSearch();
     toggleAdvancedSearch(); // Hide the panel after search
 }
+
+// Debug function to test authentication
+window.debugAuth = function() {
+    console.log('=== DEBUG AUTH ===');
+    console.log('currentUser:', currentUser);
+    console.log('token:', getAuthToken());
+    console.log('daily usage:', getCurrentDailyUsage());
+    const addTopicBtn = document.getElementById('add-topic-btn');
+    console.log('add topic button:', addTopicBtn);
+    console.log('add topic button disabled:', addTopicBtn ? addTopicBtn.disabled : 'not found');
+    console.log('==================');
+};
 
 // ... existing code ...
