@@ -188,6 +188,11 @@ async function performRegister() {
                 closeAuthModal();
                 showVerificationModal();
                 showNotification('Registration successful! Please check your email for verification code.');
+            } else if (result.emailServiceDown) {
+                // Email service is down, but registration completed
+                loginUser(result.user, result.token);
+                closeAuthModal();
+                showNotification('Registration successful! Email verification is temporarily unavailable, but you can use the app normally.');
             } else {
                 // Direct login (shouldn't happen with new system)
                 loginUser(result.user, result.token);
