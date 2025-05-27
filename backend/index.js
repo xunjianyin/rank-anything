@@ -335,6 +335,41 @@ app.post('/api/register', validateContent, async (req, res) => {
     if (err) return res.status(500).json({ error: 'Database error.' });
     if (existingUser) return res.status(400).json({ error: 'Email or username already exists.' });
     
+    // TEMPORARY: Skip email verification due to email service issues
+    // Create user account directly
+    const hash = bcrypt.hashSync(password, 10);
+    
+    db.run('INSERT INTO users (username, email, password, email_verified) VALUES (?, ?, ?, ?)', 
+      [username, email, hash, 0], function(err) {
+        if (err) return res.status(500).json({ error: 'Database error.' });
+        
+        const userId = this.lastID;
+        
+        // Generate JWT token
+        const token = jwt.sign({ 
+          id: userId, 
+          username: username, 
+          email: email, 
+          isAdmin: false 
+        }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+        
+        res.json({ 
+          token, 
+          user: { 
+            id: userId, 
+            username: username, 
+            email: email, 
+            isAdmin: false,
+            emailVerified: false
+          },
+          message: 'Registration completed! Email verification is temporarily disabled.',
+          emailServiceDown: true
+        });
+      });
+    return;
+    
+    // OLD CODE - TEMPORARILY DISABLED
+    /*
     // Check if there's already a pending registration with this email/username
     db.get('SELECT * FROM pending_registrations WHERE email = ? OR username = ?', [email, username], async (err, pendingUser) => {
       if (err) return res.status(500).json({ error: 'Database error.' });
@@ -545,6 +580,8 @@ app.post('/api/verify-email', (req, res) => {
           });
       });
     });
+    */
+  });
 });
 
 // Resend verification code
