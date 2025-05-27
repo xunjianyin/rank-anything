@@ -1772,8 +1772,8 @@ async function loadMyRating() {
 async function renderReviews() {
     const reviewsList = document.getElementById('reviews-list');
     try {
-        const ratings = await fetchRatings(currentObjectId);
-        if (ratings.length === 0) {
+        const ratingsData = await fetchRatings(currentObjectId); // fetchRatings returns the array directly
+        if (!ratingsData || ratingsData.length === 0) {
             reviewsList.innerHTML = `
                 <div class="empty-state">
                     <i class="fas fa-comment"></i>
@@ -1784,14 +1784,14 @@ async function renderReviews() {
             return;
         }
         // Sort ratings by date (newest first)
-        const sortedRatings = [...ratings].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-        reviewsList.innerHTML = sortedRatings.map((rating, index) => `
-            <div class="review-item">
+        const sortedRatings = [...ratingsData].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        reviewsList.innerHTML = sortedRatings.map((rating) => `
+            <div class="review-item" id="review-${rating.id}">
                 <div class="review-owner">by ${makeUsernameClickable(rating.username, rating.user_id)}</div>
                 ${currentUser && rating.user_id === currentUser.id ? `
                     <div class="review-actions">
-                        <button class="btn btn-small btn-secondary" onclick="editReview(${index})">
-                            <i class="fas fa-edit"></i>
+                        <button class="btn btn-small btn-secondary" onclick="editReview(${rating.id})">
+                            <i class="fas fa-edit"></i> Edit
                         </button>
                     </div>
                 ` : ''}
@@ -1800,6 +1800,7 @@ async function renderReviews() {
                     <span class="review-date">${formatDate(rating.created_at)}</span>
                 </div>
                 ${rating.review ? `<div class="review-text">${escapeHtml(rating.review)}</div>` : ''}
+                ${rating.updated_at && rating.updated_at !== rating.created_at ? `<div class="review-edited-notice">(edited ${formatDate(rating.updated_at)})</div>` : ''}
             </div>
         `).join('');
     } catch (e) {
@@ -1818,31 +1819,46 @@ async function submitRating() {
         return;
     }
     
-    // Check daily limits before proceeding (admins bypass this)
-    if (!currentUser.isAdmin && !incrementDailyUsage('ratings')) {
-        return;
-    }
-    
     const reviewText = document.getElementById('review-text').value.trim();
+    const submitButton = document.getElementById('submit-rating-btn');
+    const editingRatingId = submitButton.dataset.editingRatingId;
+
     try {
-        const result = await submitRatingToAPI(currentObjectId, selectedRating, reviewText);
-        await renderObjectDetails();
-        await renderReviews();
-        
-        if (result.isUpdate) {
+        let result;
+        if (editingRatingId) {
+            // This is an update to an existing rating
+            result = await updateRatingAPI(editingRatingId, selectedRating, reviewText);
             showNotification('Rating updated successfully!');
-            document.getElementById('submit-rating-btn').textContent = 'Update Rating';
         } else {
-            showNotification('Rating submitted successfully!');
-            document.getElementById('submit-rating-btn').textContent = 'Update Rating';
+            // This is a new rating submission
+            // Check daily limits before proceeding (admins bypass this)
+            if (!currentUser.isAdmin && !incrementDailyUsage('ratings')) {
+                 // incrementDailyUsage already shows an alert if limit is reached
+                return; 
+            }
+            result = await submitRatingToAPI(currentObjectId, selectedRating, reviewText);
+            showNotification('New rating submitted successfully!');
         }
+        
+        // Clear API cache to ensure fresh data
+        clearApiCache();
+        
+        await renderObjectDetails(); // Recalculates average, etc.
+        await renderReviews();     // Re-renders the reviews list
+        
+        // Reset the form
+        resetRatingForm(); // This will also clear editingRatingId from the button and reset its text
+
     } catch (e) {
         // Check if it's a content filter error
         if (e.message.includes('sensitive content') || e.message.includes('inappropriate content')) {
             alert('Content Filter Error: ' + e.message + '\n\nPlease revise your review text to remove any inappropriate content.');
         } else {
-            alert('Failed to submit rating: ' + e.message);
+             alert('Failed to submit rating: ' + e.message);
         }
+        // If it was a new rating attempt that failed due to non-limit reasons, and usage was incremented,
+        // we might need to decrement it. However, incrementDailyUsage only returns false if limit reached.
+        // Failures due to 24h cooldown or other errors won't have incremented the daily usage counter yet.
     }
 }
 
@@ -1889,8 +1905,10 @@ function resetRatingForm() {
     selectedRating = 0;
     updateStarDisplay();
     document.getElementById('review-text').value = '';
-    document.getElementById('submit-rating-btn').textContent = 'Submit Rating';
-    editingReview = null;
+    const submitButton = document.getElementById('submit-rating-btn');
+    submitButton.textContent = 'Submit Rating';
+    delete submitButton.dataset.editingRatingId; // Clear editing state
+    // editingReview = null; // This global variable seems unused for this flow now
 }
 
 // Utility functions
@@ -5432,3 +5450,226 @@ window.debugAuth = function() {
 };
 
 // ... existing code ...
+
+// Function to handle editing a review
+async function editReview(ratingId) { // Changed from reviewIndex to ratingId
+    if (!currentUser || !currentObjectId) return;
+
+    try {
+        // Fetch the specific rating by its ID to ensure we are editing the correct one
+        // This requires an endpoint to fetch a single rating, or we adapt fetchRatings to handle it,
+        // or we find it within the list already fetched by renderReviews if that list is reliably current.
+        // For simplicity and to ensure we edit the exact rating the user clicked on,
+        // we assume renderReviews has already fetched all ratings and we can find it.
+        // A more robust solution might be a GET /api/ratings/:ratingId endpoint if needed.
+
+        const allRatings = await fetchRatings(currentObjectId); // This fetches all ratings for the object
+        const reviewToEdit = allRatings.find(r => r.id == ratingId);
+
+
+        if (!reviewToEdit) {
+            alert('Could not find the review to edit.');
+            return;
+        }
+        // Check if the current user is the owner of the review
+        if (reviewToEdit.user_id !== currentUser.id && !currentUser.isAdmin) {
+            alert('You can only edit your own reviews.');
+            return;
+        }
+
+
+        // Populate the rating form
+        selectedRating = reviewToEdit.rating;
+        document.getElementById('review-text').value = reviewToEdit.review || '';
+        updateStarDisplay(); // Update the visual star selection
+
+        // Change button text to indicate an update
+        document.getElementById('submit-rating-btn').textContent = 'Update Rating';
+        // Store the ID of the rating being edited
+        document.getElementById('submit-rating-btn').dataset.editingRatingId = reviewToEdit.id;
+
+
+        // Scroll to the rating form for convenience
+        document.getElementById('star-rating').scrollIntoView({ behavior: 'smooth' });
+
+    } catch (error) {
+        console.error('Error preparing review for editing:', error);
+        alert('Failed to load review for editing: ' + error.message);
+    }
+}
+window.editReview = editReview;
+
+// Object editing functions
+// ... existing code ...
+async function submitRatingToAPI(objectId, rating, review) { // This is for NEW ratings
+    const token = getAuthToken();
+    const res = await fetch(BACKEND_URL + `/api/objects/${objectId}/ratings`, { // POST to create new
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + token
+        },
+        body: JSON.stringify({ rating, review })
+    });
+    if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || 'Failed to submit new rating');
+    }
+    return await res.json();
+}
+
+async function updateRatingAPI(ratingId, rating, review) { // This is for UPDATING existing ratings
+    const token = getAuthToken();
+    const res = await fetch(BACKEND_URL + `/api/ratings/${ratingId}`, { // PUT to update specific rating
+        method: 'PUT',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + token
+        },
+        body: JSON.stringify({ rating, review })
+    });
+    if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || 'Failed to update rating');
+    }
+    return await res.json();
+}
+
+
+// Replace renderReviews to use API
+async function renderReviews() {
+    const reviewsList = document.getElementById('reviews-list');
+    try {
+        const ratingsData = await fetchRatings(currentObjectId); // fetchRatings returns the array directly
+        if (!ratingsData || ratingsData.length === 0) {
+            reviewsList.innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-comment"></i>
+                    <h3>No reviews yet</h3>
+                    <p>Be the first to share your thoughts!</p>
+                </div>
+            `;
+            return;
+        }
+        // Sort ratings by date (newest first)
+        const sortedRatings = [...ratingsData].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        reviewsList.innerHTML = sortedRatings.map((rating) => `
+            <div class="review-item" id="review-${rating.id}">
+                <div class="review-owner">by ${makeUsernameClickable(rating.username, rating.user_id)}</div>
+                ${currentUser && rating.user_id === currentUser.id ? `
+                    <div class="review-actions">
+                        <button class="btn btn-small btn-secondary" onclick="editReview(${rating.id})">
+                            <i class="fas fa-edit"></i> Edit
+                        </button>
+                    </div>
+                ` : ''}
+                <div class="review-header">
+                    <span class="review-rating">${renderStars(rating.rating)}</span>
+                    <span class="review-date">${formatDate(rating.created_at)}</span>
+                </div>
+                ${rating.review ? `<div class="review-text">${escapeHtml(rating.review)}</div>` : ''}
+                ${rating.updated_at && rating.updated_at !== rating.created_at ? `<div class="review-edited-notice">(edited ${formatDate(rating.updated_at)})</div>` : ''}
+            </div>
+        `).join('');
+    } catch (e) {
+        reviewsList.innerHTML = '<div class="error">Failed to load reviews.</div>';
+    }
+}
+
+// Replace submitRating to use API
+async function submitRating() {
+    if (!currentUser) {
+        alert('Please login to submit ratings');
+        return;
+    }
+    if (selectedRating === 0) {
+        alert('Please select a rating');
+        return;
+    }
+    
+    const reviewText = document.getElementById('review-text').value.trim();
+    const submitButton = document.getElementById('submit-rating-btn');
+    const editingRatingId = submitButton.dataset.editingRatingId;
+
+    try {
+        let result;
+        if (editingRatingId) {
+            // This is an update to an existing rating
+            result = await updateRatingAPI(editingRatingId, selectedRating, reviewText);
+            showNotification('Rating updated successfully!');
+        } else {
+            // This is a new rating submission
+            // Check daily limits before proceeding (admins bypass this)
+            if (!currentUser.isAdmin && !incrementDailyUsage('ratings')) {
+                 // incrementDailyUsage already shows an alert if limit is reached
+                return; 
+            }
+            result = await submitRatingToAPI(currentObjectId, selectedRating, reviewText);
+            showNotification('New rating submitted successfully!');
+        }
+        
+        // Clear API cache to ensure fresh data
+        clearApiCache();
+        
+        await renderObjectDetails(); // Recalculates average, etc.
+        await renderReviews();     // Re-renders the reviews list
+        
+        // Reset the form
+        resetRatingForm(); // This will also clear editingRatingId from the button and reset its text
+
+    } catch (e) {
+        // Check if it's a content filter error
+        if (e.message.includes('sensitive content') || e.message.includes('inappropriate content')) {
+            alert('Content Filter Error: ' + e.message + '\n\nPlease revise your review text to remove any inappropriate content.');
+        } else {
+             alert('Failed to submit rating: ' + e.message);
+        }
+        // If it was a new rating attempt that failed due to non-limit reasons, and usage was incremented,
+        // we might need to decrement it. However, incrementDailyUsage only returns false if limit reached.
+        // Failures due to 24h cooldown or other errors won't have incremented the daily usage counter yet.
+    }
+}
+
+
+// Star rating system
+// ... existing code ...
+function resetRatingForm() {
+    selectedRating = 0;
+    updateStarDisplay();
+    document.getElementById('review-text').value = '';
+    const submitButton = document.getElementById('submit-rating-btn');
+    submitButton.textContent = 'Submit Rating';
+    delete submitButton.dataset.editingRatingId; // Clear editing state
+    // editingReview = null; // This global variable seems unused for this flow now
+}
+
+// Utility functions
+// ... existing code ...
+async function loadMyRating() {
+    if (!currentUser || !currentObjectId) {
+        resetRatingForm(); // Ensure form is reset if no user/object
+        return;
+    }
+    
+    try {
+        const result = await fetchMyObjectRating(currentObjectId); // Fetches the LATEST rating by this user
+        if (result.rating) {
+            // Pre-populate the form with the user's LATEST rating
+            // This is for display when page loads. If they want to edit an OLDER rating, they use the edit button next to it.
+            selectedRating = result.rating.rating;
+            document.getElementById('review-text').value = result.rating.review || '';
+            document.getElementById('submit-rating-btn').textContent = 'Submit New Rating (or Edit Latest)'; // Clarify button action
+            // Do NOT set editingRatingId here, as this is just loading their latest for potential new submission
+            // If they want to edit this specific latest one, they should ideally click an edit button for it if one were shown.
+            // Or, we can decide that `loadMyRating` prepares for an *update* of this latest rating.
+            // For now, let's keep it simple: it loads data. If user submits, it's a NEW rating unless an `editReview` call set an `editingRatingId`.
+            updateStarDisplay();
+        } else {
+            // No existing rating by this user for this object
+            resetRatingForm();
+        }
+    } catch (error) {
+        console.error('Error loading my rating:', error);
+        resetRatingForm();
+    }
+}

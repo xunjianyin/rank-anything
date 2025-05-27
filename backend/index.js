@@ -1669,6 +1669,7 @@ app.get('/api/objects/:objectId/ratings', (req, res) => {
 // Create or update a rating/review for an object
 app.post('/api/objects/:objectId/ratings', authenticateToken, validateContent, (req, res) => {
   const objectId = req.params.objectId;
+  const userId = req.user.id; // Get userId from authenticated user
   const { rating, review } = req.body; // review can be null or empty string
 
   if (typeof rating !== 'number' || rating < 1 || rating > 5) {
@@ -1684,71 +1685,53 @@ app.post('/api/objects/:objectId/ratings', authenticateToken, validateContent, (
     if (err) return res.status(500).json({ error: 'Database error checking object.' });
     if (!objectExists) return res.status(404).json({ error: 'Object not found.' });
 
-    db.get('SELECT * FROM ratings WHERE object_id = ? AND user_id = ?', [objectId, req.user.id], (err, existing) => {
-      if (err) return res.status(500).json({ error: 'Database error checking existing rating.' });
+    // 24-hour cooldown check: User can only submit a new rating for this object
+    // if their last rating for this object was more than 24 hours ago.
+    db.get('SELECT MAX(created_at) as last_submission_time FROM ratings WHERE object_id = ? AND user_id = ?', 
+      [objectId, userId], (err, lastRating) => {
+      if (err) return res.status(500).json({ error: 'Database error checking rating history.' });
 
-      if (existing) {
-        // User is updating their rating
-        // Check if user already modified this rating today (unless it's the first modification of the day)
-        const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-        const updatedAtDate = existing.updated_at ? new Date(existing.updated_at).toISOString().slice(0, 10) : null;
-        const createdAtDate = new Date(existing.created_at).toISOString().slice(0, 10);
-
-        // Allow update if it's the first update ever, or if last update was not today
-        if (updatedAtDate === today && updatedAtDate !== createdAtDate) {
-             // This means it was created on a previous day and updated today OR created today and updated again today.
-             // A simpler rule: only one update per day after the initial creation day.
-             // If created_at is today, and updated_at is also today (and different from created_at), then it's a second update today.
-            if (createdAtDate === today && existing.updated_at !== existing.created_at) {
-                 return res.status(403).json({ error: 'You can only modify your rating once on the day it was created, or once on any subsequent day.' });
-            }
-            // If created_at was a previous day, and updated_at is today, this is the first update today.
-        }
-
-
-        db.run('UPDATE ratings SET rating = ?, review = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-          [rating, finalReview, existing.id], function(err) {
-            if (err) return res.status(500).json({ error: 'Database error updating rating.' });
-            db.get('SELECT r.*, u.username FROM ratings r LEFT JOIN users u ON r.user_id = u.id WHERE r.id = ?',
-              [existing.id], (err, updated) => {
-                if (err) return res.status(500).json({ error: 'Database error fetching updated rating.' });
-                res.json({ ...updated, isUpdate: true });
-              });
-          });
-      } else {
-        // User is creating a new rating
-        // Check daily limit for new ratings (admins bypass this)
-        if (!req.user.isAdmin) {
-          db.get(`SELECT COUNT(*) as count FROM ratings WHERE user_id = ? AND DATE(created_at) = DATE('now')`, [req.user.id], (err, row) => {
-            if (err) return res.status(500).json({ error: 'Database error checking daily limit.' });
-            if (row.count >= 64) return res.status(403).json({ error: 'Daily rating limit reached (64 new ratings per day).' });
-            createNewRating();
-          });
-        } else {
-          createNewRating();
+      if (lastRating && lastRating.last_submission_time) {
+        const lastSubmissionDate = new Date(lastRating.last_submission_time);
+        const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        if (lastSubmissionDate > twentyFourHoursAgo) {
+          return res.status(429).json({ error: 'You can only submit a new rating for this object once every 24 hours.' });
         }
       }
-    });
-  });
 
-  function createNewRating() {
-    db.run('INSERT INTO ratings (object_id, user_id, rating, review) VALUES (?, ?, ?, ?)',
-      [objectId, req.user.id, rating, finalReview], function(err) {
-        if (err) return res.status(500).json({ error: 'Database error creating new rating.' });
-        db.get('SELECT r.*, u.username FROM ratings r LEFT JOIN users u ON r.user_id = u.id WHERE r.id = ?',
-          [this.lastID], (err, newRating) => {
-            if (err) return res.status(500).json({ error: 'Database error fetching new rating.' });
-            res.status(201).json({ ...newRating, isUpdate: false }); // 201 Created
-          });
-      });
-  }
+      // Proceed to create a new rating
+      // Daily limit check for new ratings (admins bypass this)
+      if (!req.user.isAdmin) {
+        db.get(`SELECT COUNT(*) as count FROM ratings WHERE user_id = ? AND DATE(created_at) = DATE('now')`, [userId], (err, row) => {
+          if (err) return res.status(500).json({ error: 'Database error checking daily limit.' });
+          if (row.count >= 64) return res.status(403).json({ error: 'Daily rating limit reached (64 new ratings per day).' });
+          insertNewRating();
+        });
+      } else {
+        insertNewRating();
+      }
+    });
+
+    function insertNewRating() {
+      db.run('INSERT INTO ratings (object_id, user_id, rating, review, created_at, updated_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)',
+        [objectId, userId, rating, finalReview], function(err) {
+          if (err) return res.status(500).json({ error: 'Database error creating new rating.' });
+          db.get('SELECT r.*, u.username FROM ratings r LEFT JOIN users u ON r.user_id = u.id WHERE r.id = ?',
+            [this.lastID], (err, newRating) => {
+              if (err) return res.status(500).json({ error: 'Database error fetching new rating.' });
+              res.status(201).json({ ...newRating, isUpdate: false, message: "New rating submitted." }); // 201 Created
+            });
+        });
+    }
+  });
 });
 
 // Get current user's rating for an object
+// This will now fetch the LATEST rating if multiple exist.
 app.get('/api/objects/:objectId/my-rating', authenticateToken, (req, res) => {
   const objectId = req.params.objectId;
 
-  db.get('SELECT * FROM ratings WHERE object_id = ? AND user_id = ?', [objectId, req.user.id], (err, rating) => {
+  db.get('SELECT * FROM ratings WHERE object_id = ? AND user_id = ? ORDER BY created_at DESC LIMIT 1', [objectId, req.user.id], (err, rating) => {
     if (err) return res.status(500).json({ error: 'Database error.' });
     res.json({ rating: rating || null }); // Return null if no rating found
   });
@@ -3116,6 +3099,66 @@ app.post('/api/dev/verify-user', (req, res) => {
                 message: 'User verified successfully via dev endpoint!'
             });
             });
+    });
+  });
+});
+
+// New endpoint to update a specific existing rating
+app.put('/api/ratings/:ratingId', authenticateToken, validateContent, (req, res) => {
+  const ratingId = req.params.ratingId;
+  const userId = req.user.id;
+  const { rating, review } = req.body;
+
+  if (typeof rating !== 'number' || rating < 1 || rating > 5) {
+    return res.status(400).json({ error: 'Rating must be a number between 1-5.' });
+  }
+  if (review !== undefined && review !== null && typeof review !== 'string') {
+    return res.status(400).json({ error: 'Review must be a string, null, or undefined.' });
+  }
+  const finalReview = (review === undefined || review === null) ? '' : review;
+
+  // First, get the rating to check ownership and its object_id
+  db.get('SELECT * FROM ratings WHERE id = ?', [ratingId], (err, existingRating) => {
+    if (err) return res.status(500).json({ error: 'Database error fetching rating.' });
+    if (!existingRating) return res.status(404).json({ error: 'Rating not found.' });
+    if (existingRating.user_id !== userId && !req.user.isAdmin) { // Allow admin to edit any rating
+      return res.status(403).json({ error: 'You can only edit your own ratings.' });
+    }
+
+    const objectId = existingRating.object_id;
+
+    // 24-hour cooldown check for the parent object for this user
+    // User can only edit a rating if their last interaction (new rating OR edit) with this OBJECT was > 24h ago
+    // Note: This checks the MAX(updated_at) for all ratings of this user on this object.
+    // If a user has multiple ratings for an object, this rule applies to the object as a whole for that user.
+    db.get('SELECT MAX(updated_at) as last_activity_time FROM ratings WHERE object_id = ? AND user_id = ?',
+      [objectId, userId], (err, lastActivity) => {
+      if (err) return res.status(500).json({ error: 'Database error checking activity history.' });
+
+      if (lastActivity && lastActivity.last_activity_time) {
+        const lastActivityDate = new Date(lastActivity.last_activity_time);
+        const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        
+        // Allow edit if the rating being edited IS the one that caused the last activity (i.e. updated_at is very recent for this specific ratingId)
+        // OR if the last activity for ANY rating on this object by this user was more than 24h ago.
+        const ratingBeingEditedLastUpdate = new Date(existingRating.updated_at);
+        const isEditingTheMostRecentInteraction = Math.abs(ratingBeingEditedLastUpdate.getTime() - lastActivityDate.getTime()) < 5000; // Check if this specific rating was the last thing touched (within 5s tolerance for DB time)
+
+        if (!isEditingTheMostRecentInteraction && lastActivityDate > twentyFourHoursAgo) {
+          return res.status(429).json({ error: 'You can only edit ratings for this object once every 24 hours.' });
+        }
+      }
+
+      // Proceed to update the rating
+      db.run('UPDATE ratings SET rating = ?, review = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        [rating, finalReview, ratingId], function(updateErr) {
+          if (updateErr) return res.status(500).json({ error: 'Database error updating rating.' });
+          db.get('SELECT r.*, u.username FROM ratings r LEFT JOIN users u ON r.user_id = u.id WHERE r.id = ?',
+            [ratingId], (fetchErr, updatedRating) => {
+              if (fetchErr) return res.status(500).json({ error: 'Database error fetching updated rating.' });
+              res.json({ ...updatedRating, isUpdate: true, message: "Rating updated successfully." });
+            });
+        });
     });
   });
 });
