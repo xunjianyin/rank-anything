@@ -4137,7 +4137,10 @@ async function fetchProposals(status = '') {
         headers: { 'Authorization': 'Bearer ' + token }
     });
     if (!res.ok) throw new Error('Failed to fetch proposals');
-    return await res.json();
+    const data = await res.json();
+    // The backend returns { proposals: [...], pagination: {...} }
+    // We need to return just the proposals array
+    return data.proposals || [];
 }
 
 async function createProposal(type, target_type, target_id, new_value, reason) {
@@ -4333,7 +4336,8 @@ document.renderProposals = async function renderProposals() {
         
         proposalsList.innerHTML = proposalElements.join('');
     } catch (e) {
-        proposalsList.innerHTML = '<div class="error">Failed to load proposals.</div>';
+        console.error('Error loading proposals:', e);
+        proposalsList.innerHTML = '<div class="error">Failed to load proposals: ' + e.message + '</div>';
     }
 }
 
